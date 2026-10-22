@@ -174,4 +174,24 @@ As things stand, the spec's AWS design (EC2 + DynamoDB + ALB) **cannot be deploy
 in this account. We need the hackathon organizers to say which compute service
 participants are meant to use.
 
-Blocked on: confirmation from the organizers of the allowed AWS services.
+**Update:** the account is on the AWS **Free plan** ($100 credits, ends 2027-04-09).
+The owner (console user) can use EC2; the IAM user `<iam-user>` cannot. Workaround:
+the owner launches instances in the console, and the agent works over SSH.
+
+## 7. EC2 instance — VERIFIED 2026-10-22
+
+| Property | Value |
+|---|---|
+| Instance | `<instance-id>` ("Cloude"), ap-southeast-2a (Sydney) |
+| Type | m7i-flex.large: 2 vCPU, 7.6 GiB RAM, about $0.12/h (from credits) |
+| OS | Ubuntu 24.04.5 LTS, x86_64 |
+| Disk | 30 GB gp3; 4 GB swap file added |
+| Access | `ssh -i ~/.ssh/swarm-slam.pem ubuntu@<ec2-public-ip>` (IP changes on stop/start) |
+| IAM role | none attached yet |
+
+ROS Jazzy apt has **`ros-jazzy-gtsam` 4.2.0**, the same version build-everything.sh
+compiles, so we skip the GTSAM source build. cslam uses GTSAM only from C++.
+RTAB-Map 0.23.13 (apt) links the system OpenCV 4.6. Our OpenCV 5 nodes stay in a
+separate venv.
+
+Setup script: `scripts/ec2_setup.sh`.
