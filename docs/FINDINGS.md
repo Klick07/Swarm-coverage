@@ -195,3 +195,26 @@ RTAB-Map 0.23.13 (apt) links the system OpenCV 4.6. Our OpenCV 5 nodes stay in a
 separate venv.
 
 Setup script: `scripts/ec2_setup.sh`.
+
+## 8. Phase 1 build — VERIFIED 2026-10-22
+
+- `colcon build`: all 3 packages built in 4 min 36 s (cslam 3 min 49 s).
+- Linker warning: librtabmap_core links liboctomap 1.9 while ROS links 1.10,
+  so both get loaded. The nodes run, but watch for crashes in octomap code.
+- Smoke test: `map_manager`, `pose_graph_manager` and
+  `loop_closure_detection_node.py` all start and keep running ("Initialization
+  done", CosPlace selected).
+- Fixed: numba 0.68 crashed on Ubuntu's coverage 7.4
+  (`coverage.types.Tracer` missing). A user-level coverage 7.16.2 solves it.
+- Python stack (system python 3.12 + `~/.local`): torch 2.14.1+cpu,
+  torchvision 0.29.1, numpy 1.26.4 (apt), numba 0.68.0, open3d 0.20.0, system
+  cv2 4.6.0.
+- CosPlace ResNet-18/64 from the CosPlace v1.0 release (sha256 `5535824d…`)
+  loads into cslam's `GeoLocalizationNet` with `strict=True` and gives 64-dim
+  descriptors. It's installed at `install/cslam/share/cslam/models/resnet18_64.pth`.
+  Config: `nn_checkpoint: models/resnet18_64.pth`, `backbone: resnet18`,
+  `descriptor_dim: 64`.
+- Disk after build: 16 GB used, 13 GB free.
+
+Still open in Phase 1: run a stereo example end to end (step 8) and make the AMI
+snapshot (step 9; console only, done by the owner).

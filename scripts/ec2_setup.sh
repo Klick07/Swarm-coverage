@@ -30,13 +30,24 @@ rosdep update -q
 rosdep install --from-paths src -y --ignore-src --rosdistro jazzy -q
 
 echo "== python deps for cslam (system python, numpy<2 to keep rclpy/cv_bridge ABI)"
+# Versions verified working on 2026-10-22. coverage>=7.6: numba 0.68 needs a
+# newer coverage than Ubuntu's python3-coverage 7.4.
 PIP="pip install --user --break-system-packages -q"
-$PIP --index-url https://download.pytorch.org/whl/cpu torch torchvision
-$PIP "numpy<2" networkx numba open3d Pillow scikit_learn scipy sortedcontainers distinctipy numpy-quaternion
+$PIP --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+$PIP "numpy<2" networkx==3.6.1 numba==0.68.0 open3d==0.20.0 Pillow scikit_learn==1.9.1 \
+  scipy==1.17.1 sortedcontainers==2.4.0 distinctipy==1.3.4 numpy-quaternion==2024.0.13 \
+  coverage==7.16.2
 
 echo "== colcon build (low parallelism for 2 vCPU / 8 GB)"
 export MAKEFLAGS=-j2
 colcon build --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+echo "== CosPlace ResNet-18 / dim 64 (cslam loads it from its installed share dir)"
+MODELS=$WS/install/cslam/share/cslam/models
+mkdir -p "$MODELS"
+[ -f "$MODELS/resnet18_64.pth" ] || curl -sSfL -o "$MODELS/resnet18_64.pth" \
+  https://github.com/gmberton/CosPlace/releases/download/v1.0/ResNet18_64_cosplace.pth
+echo "5535824d5314c9fbb75bc4625d9398bcc51ab8b1f448daf0e0abd36c1fffbc48  $MODELS/resnet18_64.pth" | sha256sum -c
 
 grep -q swarm_ws/install ~/.bashrc || cat >> ~/.bashrc <<'EOF'
 source /opt/ros/jazzy/setup.bash
