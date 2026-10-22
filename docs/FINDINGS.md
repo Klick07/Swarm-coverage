@@ -158,4 +158,20 @@ left and right arrive in the **same frame**, so they're synchronized by construc
 | 4. OpenCV 5 | Verified on Mac; check on EC2 |
 | 5. Time sync | Decided |
 
-Blocked on: AWS credentials (`aws configure`) for Phase 1.
+## 6. AWS account restrictions — VERIFIED 2026-10-22
+
+IAM user `<iam-user>` in account <aws-account-id>, default region us-east-1. The account
+belongs to AWS Organization `<org-id>`, and its SCP `<scp-id>` **explicitly
+denies** some services in every region tested (us-east-1/2, us-west-2,
+eu-west-1, eu-central-1, ap-south-1, ap-southeast-1). IAM policies on the user
+cannot override an SCP.
+
+| Works | Denied by SCP | Not tested (user has no policy for it) |
+|---|---|---|
+| S3, CloudWatch Logs, CloudWatch metrics, ACM, Bedrock (model listing; Anthropic models visible), Elastic Beanstalk (describe only) | EC2 (incl. DescribeVpcs), DynamoDB, ELB, SSM, Lambda, SNS, Bedrock Agents | ECS, ECR, App Runner, Lightsail, SageMaker, Batch, API Gateway, CloudFront, SQS, IoT |
+
+As things stand, the spec's AWS design (EC2 + DynamoDB + ALB) **cannot be deployed**
+in this account. We need the hackathon organizers to say which compute service
+participants are meant to use.
+
+Blocked on: confirmation from the organizers of the allowed AWS services.
