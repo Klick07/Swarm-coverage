@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+calib/
+recordings/
+.DS_Store

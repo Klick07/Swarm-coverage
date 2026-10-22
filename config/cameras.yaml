@@ -1,0 +1,16 @@
+# Camera settings. Values are ASSUMED until real hardware is tested (see docs/FINDINGS.md item 1).
+# layout: side_by_side (one url) or separate (left_url + right_url)
+defaults:
+  layout: side_by_side
+  width: 1280        # full frame; each eye is width/2 for side_by_side
+  height: 480
+  fps: 15
+  pair_tolerance_ms: 15   # only used for layout: separate
+
+cameras:
+  - id: 0
+    url: http://192.168.1.101:8080/stream
+  - id: 1
+    url: http://192.168.1.102:8080/stream
+  - id: 2
+    url: http://192.168.1.103:8080/stream
