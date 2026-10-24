@@ -27,9 +27,11 @@ def setup(context):
     # `python -m` from cwd=REPO finds our package; don't touch PYTHONPATH, ROS puts rclpy there.
     py = dict(cwd=REPO, output="screen")
 
-    actions = [Node(package="tf2_ros", executable="static_transform_publisher",
-                    arguments=["--roll", "-1.5707963", "--yaw", "-1.5707963",
-                               "--frame-id", "camera_link", "--child-frame-id", "camera_optical"])]
+    # Images are stamped in frame "camera_link" itself, i.e. the base frame IS the optical frame.
+    # With a rotated camera_link->camera_optical TF, Swarm-SLAM's inter-robot loop closures came
+    # out in the optical frame while odometry was in camera_link, so whole robots were merged
+    # rotated by exactly that 120 deg (run euroc3_r025_b). Its own KITTI launch uses identity too.
+    actions = []
     for i in range(robots):
         ns, mav0 = f"/r{i}", f"{DATA}/{SEQUENCES[i]}/mav0"
         cam = f"{ns}/stereo_camera"

@@ -53,7 +53,7 @@ def main():
             time.sleep(max(0.0, target - time.monotonic()))
             left = cv2.imread(f"{args.mav0}/cam0/data/{fl}", cv2.IMREAD_GRAYSCALE)
             right = cv2.imread(f"{args.mav0}/cam1/data/{fr}", cv2.IMREAD_GRAYSCALE)
-            header = Header(frame_id="camera_optical", stamp=node.get_clock().now().to_msg())
+            header = Header(frame_id="camera_link", stamp=node.get_clock().now().to_msg())
             pub_l.publish(to_msg(left, header))
             pub_r.publish(to_msg(right, header))
             out.write(f"{header.stamp.sec * 10**9 + header.stamp.nanosec},{ts}\n")

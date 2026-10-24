@@ -20,9 +20,9 @@ import yaml
 from scipy.spatial.transform import Rotation
 
 SEQUENCES = ["MH_01_easy", "MH_02_easy", "MH_03_medium"]
-# camera_link -> camera_optical as published by the launch file (roll -90, yaw -90)
+# camera_link -> camera optical frame. Identity since run euroc3_r025_c (see launch file);
+# runs euroc3_r025 and _b used roll -90 / yaw -90 and need that rotation here instead.
 T_LINK_OPT = np.eye(4)
-T_LINK_OPT[:3, :3] = Rotation.from_euler("xyz", [-np.pi / 2, 0, -np.pi / 2]).as_matrix()
 
 
 def decode_key(key):
