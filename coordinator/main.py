@@ -18,9 +18,13 @@ import cv2
 from coordinator.store import Store
 from coordinator.verify import verify_pair
 
-# Tuned on run euroc3_r025_c (docs/FINDINGS.md item 10); see the report for the reasoning.
-WEAK_BLUR = 90.0          # ~5th percentile of median blur
-WEAK_TRACK = 0.50         # between the 1st and 5th percentile of track_inliers
+# Weak tracking = tracking inliers < WEAK_TRACK, or almost no features (a blank wall leaves nothing
+# to track). Blur is shown but no longer triggers: tuned at 90 in the bright Machine Hall, it flagged
+# 71-83% of normal frames in the darker Vicon Room (median blur 48-59) and caused 52 warnings there vs
+# 14 for tracking alone, while both rules caught both injected failures (eval/quality_rules.py).
+WEAK_BLUR = 90.0          # informational only (Machine Hall ~5th percentile)
+WEAK_TRACK = 0.50         # between the 1st and 5th percentile of track_inliers (runs c, v1)
+MIN_FEATURES = 100
 WINDOW = 6                # frames (~2.4 s at 2.5 fps)
 QUALITY_COOLDOWN_S = 20   # per camera, in data time
 CELL_M = 2.0              # place = 2 m grid cell on the merged map's ground plane (x, z)
@@ -74,10 +78,10 @@ class Coordinator:
         def med(k):  # track_inliers is None on a camera's first frame
             vals = [x[k] for x in w if x[k] is not None]
             return round(statistics.median(vals), 3) if vals else None
-        blur, track = med("blur"), med("track_inliers")
-        return {"camera": camera, "frames": len(w), "blur": blur, "features": med("features"),
+        blur, track, features = med("blur"), med("track_inliers"), med("features")
+        return {"camera": camera, "frames": len(w), "blur": blur, "features": features,
                 "track_inliers": track, "stereo_inliers": med("stereo_inliers"),
-                "weak": blur < WEAK_BLUR or (track is not None and track < WEAK_TRACK)}
+                "weak": features < MIN_FEATURES or (track is not None and track < WEAK_TRACK)}
 
     def get_overlaps(self):
         return {"overlaps": self.store.rows(
@@ -223,8 +227,8 @@ class Coordinator:
         self.ctx = {"trigger": "quality_drop", "values": {"opencv": q, "frame_stamp_ns": ev["stamp_ns"]},
                     "overlap_id": None}
         self._decide(r, f"Quality event: camera {r} OpenCV 5 window medians over {WINDOW} frames: "
-                        f"blur {q['blur']} (threshold {WEAK_BLUR}), track_inliers {q['track_inliers']} "
-                        f"(threshold {WEAK_TRACK}), features {q['features']}.",
+                        f"track_inliers {q['track_inliers']} (weak below {WEAK_TRACK}), features {q['features']} "
+                        f"(weak below {MIN_FEATURES}), blur {q['blur']} (informational).",
                      lambda: self.notify(r, f"Camera {r}, slow down, tracking is weak."))
 
     def _on_lc(self, ev):

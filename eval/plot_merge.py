@@ -58,7 +58,8 @@ def main(out, *runs):
         panel(ax, run, title or run)
     for ax in axes[0]:
         ax.plot([], [], color=GT_GRAY, lw=1.0, label="ground truth (Leica / Vicon)")
-        ax.legend(loc="upper right", fontsize=8, frameon=True, facecolor=SURFACE, edgecolor=GRID, labelcolor=INK)
+        # Below the axes: in a small room the paths fill the whole plot.
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, fontsize=8, frameon=False, labelcolor=INK)
     fig.suptitle("Swarm-SLAM merged map, EuRoC, top-down", fontsize=12, color=INK, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(out, dpi=160, facecolor=SURFACE)

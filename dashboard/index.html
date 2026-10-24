@@ -136,7 +136,7 @@ td.num { font-variant-numeric: tabular-nums; }
 </main>
 <script>
 const CELL = 2.0;
-const WEAK_BLUR = 90, WEAK_TRACK = 0.5;
+const WEAK_TRACK = 0.5, MIN_FEATURES = 100;  // must match coordinator/main.py
 
 // Build the three tiles once; refresh() only updates their contents.
 const buildCameraTiles = () => document.getElementById("cams").innerHTML = [0, 1, 2].map(r => `
@@ -171,9 +171,9 @@ function renderCameras(s) {
     chip.className = "chip " + (q.weak ? "weak" : "ok");
     chip.textContent = q.weak ? "Tracking weak" : "Tracking OK";
     document.getElementById(`vals${r}`).innerHTML =
-      `<span>Blur <b>${fmt(q.blur, 0)}</b> <span class="t">(weak &lt; ${WEAK_BLUR})</span></span>` +
       `<span>Track inliers <b>${fmt(q.track_inliers, 2)}</b> <span class="t">(weak &lt; ${WEAK_TRACK})</span></span>` +
-      `<span>Features <b>${fmt(q.features, 0)}</b></span>`;
+      `<span>Features <b>${fmt(q.features, 0)}</b> <span class="t">(weak &lt; ${MIN_FEATURES})</span></span>` +
+      `<span>Blur <b>${fmt(q.blur, 0)}</b> <span class="t">(info)</span></span>`;
     const m = c.last_notification;
     document.getElementById(`msg${r}`).innerHTML = m
       ? `<span class="t">${hhmmss(m.t)}</span>${esc(m.message)}` : '<span class="empty">No message to this walker yet.</span>';

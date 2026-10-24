@@ -3,7 +3,7 @@ import json
 import cv2
 import numpy as np
 
-from coordinator.main import LOST_FRAMES, MIN_INLIERS, WEAK_BLUR, WINDOW, Coordinator
+from coordinator.main import LOST_FRAMES, MIN_INLIERS, WEAK_BLUR, WEAK_TRACK, WINDOW, Coordinator
 
 
 def make_run(tmp_path, same_view):
@@ -70,9 +70,26 @@ def test_slam_lost_with_good_images_notifies_then_recovers(tmp_path):
 def test_quality_drop_notifies_once_per_cooldown(tmp_path):
     c = make_run(tmp_path, same_view=True)
     for i in range(WINDOW * 3):
-        c.on_event({"type": "quality", "robot": 2, "stamp_ns": int(1e9 * (1 + i * 0.4)), "blur": WEAK_BLUR / 2,
-                    "features": 900, "stereo_inliers": 0.9, "track_inliers": 0.7, "passed": True, "ms": 1})
+        c.on_event({"type": "quality", "robot": 2, "stamp_ns": int(1e9 * (1 + i * 0.4)), "blur": 250.0,
+                    "features": 900, "stereo_inliers": 0.9, "track_inliers": WEAK_TRACK / 2, "passed": True, "ms": 1})
     notes = c.store.rows("SELECT * FROM notifications")
     assert [n["message"] for n in notes] == ["Camera 2, slow down, tracking is weak."]
     values = json.loads(c.store.rows("SELECT values_json FROM decisions")[0]["values_json"])
-    assert values["opencv"]["blur"] < WEAK_BLUR                      # the trace carries the OpenCV numbers
+    assert values["opencv"]["track_inliers"] < WEAK_TRACK            # the trace carries the OpenCV numbers
+
+
+def test_low_blur_alone_does_not_warn(tmp_path):
+    """A dark scene with low blur scores but healthy tracking (Vicon Room) must not nag walkers."""
+    c = make_run(tmp_path, same_view=True)
+    for i in range(WINDOW * 3):
+        c.on_event({"type": "quality", "robot": 1, "stamp_ns": int(1e9 * (1 + i * 0.4)), "blur": WEAK_BLUR / 2,
+                    "features": 900, "stereo_inliers": 0.9, "track_inliers": 0.7, "passed": True, "ms": 1})
+    assert not c.store.rows("SELECT * FROM notifications")
+
+
+def test_blank_wall_warns_without_track_score(tmp_path):
+    c = make_run(tmp_path, same_view=True)
+    for i in range(WINDOW * 2):  # blank wall: no features, so no tracking score at all
+        c.on_event({"type": "quality", "robot": 1, "stamp_ns": int(1e9 * (1 + i * 0.4)), "blur": 20.0,
+                    "features": 0, "stereo_inliers": 0.0, "track_inliers": None, "passed": True, "ms": 1})
+    assert [n["message"] for n in c.store.rows("SELECT * FROM notifications")] == ["Camera 1, slow down, tracking is weak."]

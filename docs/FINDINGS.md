@@ -341,3 +341,35 @@ Bedrock overlap decision 2.2 s median (p90 2.5); dashboard polls every 1 s. Fram
 covered" on the dashboard is about 30 s median, dominated by loop-closure detection.
 
 **Trajectory, merged vs single:** see item 9 (run c 0.090 m joint; run d 0.079 m joint).
+
+## 12. Vicon Room 1 and the weak-tracking rule — MEASURED 2026-10-24
+
+Data: EuRoC V1_01_easy / V1_02_medium / V1_03_difficult (145 / 85 / 107 s), same stereo rig as
+the Machine Hall (same calibration, 0.1101 m baseline), Vicon ground truth, same mirror
+(`scripts/fetch_euroc.py vicon_room1 ...`). Unpacked: 2.1 + 1.3 + 1.6 GB. Run `v1_r025_a`, quarter speed.
+
+| ATE vs Vicon | cam 0 | cam 1 | cam 2 | joint |
+|---|---|---|---|---|
+| odometry only | 0.286 m | 0.317 m | 0.458 m | 0.895 m |
+| Swarm-SLAM merged | 0.243 m | 0.059 m | 0.159 m | **0.207 m** |
+
+- These flights don't share a start pose, so here the odometry-only joint ATE is a fair
+  "not merged" baseline: merging cuts it from 0.895 to 0.207 m.
+- 12 inter-robot closures accepted, 167 rejected by Swarm-SLAM (483 measurement log lines).
+- Coverage: precision 1.00 (7/7), recall 0.667 (6/9 co-visited cells). The small room
+  overlaps constantly. Figure: `docs/figures/merge_vicon_room1.png`.
+
+**The blur threshold did not transfer.** Tuned at 90 in the bright hall, blur < 90 held for
+31% / 71% / 83% of normal Vicon frames (median blur 128 / 59 / 48), while tracking was healthy
+(median track_inliers 0.65–0.69; 2 lost-odometry frames in total). Comparison
+(`eval/quality_rules.py`, 6-frame median, 20 s cooldown):
+
+| Rule | hall d | hall e / f (failures caught) | Vicon v1 |
+|---|---|---|---|
+| blur < 90 or track < 0.5 (old) | 15 | 16 / 16 (2/2) | 52 |
+| **track < 0.5 or features < 100 (new)** | 7 | 7 / 7 (2/2) | 14 |
+| blur < 0.25x own median or track < 0.5 | 10 | 10 / 10 (2/2) | 19 |
+
+New rule adopted. Blur is shown but doesn't trigger. Failure timing is unchanged (run f:
+"slow down" +0.3 s blank, +0.2 s shake). Tests: low blur alone doesn't warn; a blank wall
+(0 features, no tracking score) does.
