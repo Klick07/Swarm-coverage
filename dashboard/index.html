@@ -136,14 +136,13 @@ td.num { font-variant-numeric: tabular-nums; }
 </main>
 <script>
 const CELL = 2.0;
-const SEQ = ["EuRoC MH_01", "EuRoC MH_02", "EuRoC MH_03"];
 const WEAK_BLUR = 90, WEAK_TRACK = 0.5;
 
 // Build the three tiles once; refresh() only updates their contents.
 const buildCameraTiles = () => document.getElementById("cams").innerHTML = [0, 1, 2].map(r => `
   <div class="cam" id="cam${r}">
     <div class="cam-head"><span class="dot" style="background:${color(r)}"></span><b>Camera ${r}</b>
-      <span class="seq">${SEQ[r]}</span><span class="chip" id="chip${r}">waiting</span></div>
+      <span class="seq" id="seq${r}"></span><span class="chip" id="chip${r}">waiting</span></div>
     <div class="cam-vals" id="vals${r}"></div>
     <div class="cam-img"><img id="img${r}" alt="Camera ${r} current frame"><div class="none" id="none${r}">No frame yet</div></div>
     <div class="cam-vals cam-msg" id="msg${r}"></div>
@@ -163,6 +162,7 @@ function refreshFrames() {
 }
 
 function renderCameras(s) {
+  (s.sequences || []).forEach((seq, r) => { const el = document.getElementById(`seq${r}`); if (el) el.textContent = `EuRoC ${seq}`; });
   for (const c of s.cameras) {
     const q = c.quality || {}, r = c.robot;
     const fmt = (v, d) => v == null ? "–" : Number(v).toFixed(d);

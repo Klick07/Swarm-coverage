@@ -11,10 +11,9 @@ import sys
 
 import cv2
 import numpy as np
-import yaml
 
 from coordinator.verify import verify_pair
-from eval.cslam_eval import SEQUENCES, nearest, read_gt, read_stamp_map
+from eval.cslam_eval import body_to_cam0, nearest, read_gt, read_stamp_map, run_sequences
 
 MIN_GT_DIST_M = 5.0
 
@@ -23,9 +22,9 @@ def main(run, gt_dir, n_samples=1500, top_k=6):
     n_samples, top_k = int(n_samples), int(top_k)
     events = [json.loads(line) for line in open(f"{run}/events.jsonl")]
     kf_stamp = {(e["robot"], e["kf"]): e["stamp_ns"] for e in events if e["type"] == "keyframe"}
-    T_B_c0 = np.array(yaml.safe_load(open(f"{gt_dir}/calib/euroc_cam0.yaml"))["T_B_c0"])
+    seqs = run_sequences(run)
     stamp_map = {r: read_stamp_map(run, r) for r in range(3)}
-    gt = {r: read_gt(f"{gt_dir}/{SEQUENCES[r]}.csv", T_B_c0) for r in range(3)}
+    gt = {r: read_gt(f"{gt_dir}/{seqs[r]}.csv", body_to_cam0(gt_dir, seqs[r])) for r in range(3)}
 
     pos = {}
     for (r, kf), s in kf_stamp.items():

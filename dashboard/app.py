@@ -16,6 +16,17 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 
 RUN_DIR = os.environ.get("RUN_DIR", "runs/euroc3_r025_d")
+
+
+def run_sequences(run_dir):
+    """EuRoC sequence per camera from the run's params.txt (older runs: Machine Hall 01-03)."""
+    try:
+        for tok in open(f"{run_dir}/params.txt").read().split():
+            if tok.startswith("seqs="):
+                return tok[5:].split(",")
+    except FileNotFoundError:
+        pass
+    return ["MH_01_easy", "MH_02_easy", "MH_03_medium"]
 APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
 app = FastAPI(title="Swarm-SLAM coordinator")
 
@@ -53,6 +64,7 @@ def state():
         c["last_notification"] = last[0] if last else None
     return {
         "run": os.path.basename(RUN_DIR),
+        "sequences": run_sequences(RUN_DIR),
         "cameras": cameras,
         "places": places,
         "trajectories": trajectories,

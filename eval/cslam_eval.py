@@ -19,7 +19,27 @@ import numpy as np
 import yaml
 from scipy.spatial.transform import Rotation
 
-SEQUENCES = ["MH_01_easy", "MH_02_easy", "MH_03_medium"]
+SEQUENCES = ["MH_01_easy", "MH_02_easy", "MH_03_medium"]  # default, and for runs made before seqs= was recorded
+
+
+def run_sequences(run_dir):
+    """EuRoC sequence per robot, as recorded by scripts/run_euroc.sh in params.txt."""
+    try:
+        for tok in open(f"{run_dir}/params.txt").read().split():
+            if tok.startswith("seqs="):
+                return tok[5:].split(",")
+    except FileNotFoundError:
+        pass
+    return SEQUENCES
+
+
+def body_to_cam0(gt_dir, seq):
+    """EuRoC T_BS of cam0 for this sequence (all sequences share one rig; older gt dirs hold one file)."""
+    for path in (f"{gt_dir}/calib/{seq}.yaml", f"{gt_dir}/calib/euroc_cam0.yaml"):
+        if os.path.exists(path):
+            with open(path) as f:
+                return np.array(yaml.safe_load(f)["T_B_c0"])
+    raise FileNotFoundError(f"no calibration for {seq} in {gt_dir}/calib")
 # camera_link -> camera optical frame. Identity since run euroc3_r025_c (see launch file);
 # runs euroc3_r025 and _b used roll -90 / yaw -90 and need that rotation here instead.
 T_LINK_OPT = np.eye(4)
@@ -104,8 +124,7 @@ def write_tum(path, rows):
 def main(run_dir, gt_dir):
     out = f"{run_dir}/eval"
     os.makedirs(out, exist_ok=True)
-    with open(f"{gt_dir}/calib/euroc_cam0.yaml") as f:
-        T_B_c0 = np.array(yaml.safe_load(f)["T_B_c0"])
+    seqs = run_sequences(run_dir)
     result_dirs = sorted(glob.glob(f"{run_dir}/cslam_logs/**/optimized_global_pose_graph.g2o", recursive=True))
     if not result_dirs:
         sys.exit(f"no optimized_global_pose_graph.g2o under {run_dir}/cslam_logs")
@@ -117,9 +136,9 @@ def main(run_dir, gt_dir):
     for kind in ("initial", "optimized"):
         poses = read_g2o(f"{logs}/{kind}_global_pose_graph.g2o")
         pairs[kind] = {}
-        for robot, seq in enumerate(SEQUENCES):
+        for robot, seq in enumerate(seqs):
             stamp_map = read_stamp_map(run_dir, robot)
-            gt = read_gt(f"{gt_dir}/{seq}.csv", T_B_c0)
+            gt = read_gt(f"{gt_dir}/{seq}.csv", body_to_cam0(gt_dir, seq))
             rows = []
             for (r, idx), T in sorted(poses.items()):
                 if r != robot or (r, idx) not in times or times[(r, idx)] not in stamp_map:

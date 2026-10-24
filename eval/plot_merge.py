@@ -11,11 +11,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from eval.cslam_eval import ate
+from eval.cslam_eval import ate, run_sequences
 
 # Reference categorical palette, slots 1-3 in fixed order (validated: CVD dE 9.2, normal 27.6).
 ROBOT_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
-NAMES = ["Robot 0 · MH_01", "Robot 1 · MH_02", "Robot 2 · MH_03"]
 SURFACE, INK, INK_2, GT_GRAY, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#b9b8b2", "#e8e7e3"
 
 
@@ -38,7 +37,7 @@ def panel(ax, run, title):
         ax.plot(p[:, 0], p[:, 1], color=SURFACE, lw=3.5, zorder=2, solid_capstyle="round")  # 2px surface ring
         # All flights land at the same pad, so end-of-line labels collide: name robots in the legend.
         ax.plot(p[:, 0], p[:, 1], color=ROBOT_COLORS[r], lw=2.0, zorder=3, solid_capstyle="round",
-                label=f"{NAMES[r]} (Swarm-SLAM)")
+                label=f"Robot {r} · {run_sequences(run)[r]} (Swarm-SLAM)")
     ax.set_title(f"{title}\njoint ATE {rmse:.3f} m (one alignment for all robots)",
                  fontsize=10, color=INK, loc="left")
     ax.set_aspect("equal")
@@ -58,9 +57,9 @@ def main(out, *runs):
         run, _, title = spec.partition(":")
         panel(ax, run, title or run)
     for ax in axes[0]:
-        ax.plot([], [], color=GT_GRAY, lw=1.0, label="ground truth (Leica)")
+        ax.plot([], [], color=GT_GRAY, lw=1.0, label="ground truth (Leica / Vicon)")
         ax.legend(loc="upper right", fontsize=8, frameon=True, facecolor=SURFACE, edgecolor=GRID, labelcolor=INK)
-    fig.suptitle("Swarm-SLAM merged map, EuRoC Machine Hall, top-down", fontsize=12, color=INK, x=0.01, ha="left")
+    fig.suptitle("Swarm-SLAM merged map, EuRoC, top-down", fontsize=12, color=INK, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(out, dpi=160, facecolor=SURFACE)
     print("wrote", out)

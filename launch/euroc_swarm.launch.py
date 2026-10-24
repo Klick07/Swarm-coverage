@@ -1,7 +1,7 @@
-"""Three robots from EuRoC MH_01-03: replay -> OpenCV 5 front end -> RTAB-Map stereo odometry -> Swarm-SLAM.
+"""Three robots from EuRoC: replay -> OpenCV 5 front end -> RTAB-Map stereo odometry -> Swarm-SLAM.
 
-ros2 launch launch/euroc_swarm.launch.py run:=<name> [rate:=0.5 skip:=2 robots:=3]
-Outputs go to ~/runs/<run>/.
+ros2 launch launch/euroc_swarm.launch.py run:=<name> [rate:=0.5 skip:=2 robots:=3 sequences:=V1_01_easy,...]
+Outputs go to ~/runs/<run>/. Calibration per sequence: calib/<sequence>.yaml.
 """
 import os
 
@@ -14,7 +14,7 @@ from launch_ros.actions import Node
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CV5_PYTHON = os.path.expanduser("~/cv5env/bin/python")
 DATA = os.path.expanduser("~/data/euroc")
-SEQUENCES = ["MH_01_easy", "MH_02_easy", "MH_03_medium"]
+DEFAULT_SEQUENCES = "MH_01_easy,MH_02_easy,MH_03_medium"
 
 
 def setup(context):
@@ -22,6 +22,7 @@ def setup(context):
     rate = context.launch_configurations["rate"]
     skip = context.launch_configurations["skip"]
     robots = int(context.launch_configurations["robots"])
+    sequences = context.launch_configurations["sequences"].split(",")
     out = os.path.expanduser(f"~/runs/{run}")
     os.makedirs(out, exist_ok=True)
     # `python -m` from cwd=REPO finds our package; don't touch PYTHONPATH, ROS puts rclpy there.
@@ -34,11 +35,11 @@ def setup(context):
     actions = [ExecuteProcess(cmd=[CV5_PYTHON, "-m", "coordinator.recorder", "--robots", str(robots),
                                    "--out", f"{out}/events.jsonl"], **py)]
     for i in range(robots):
-        ns, mav0 = f"/r{i}", f"{DATA}/{SEQUENCES[i]}/mav0"
+        ns, mav0 = f"/r{i}", f"{DATA}/{sequences[i]}/mav0"
         cam = f"{ns}/stereo_camera"
         actions += [
             ExecuteProcess(cmd=[CV5_PYTHON, "-m", "frontend.node", "--robot", str(i),
-                                "--calib", f"{REPO}/calib/euroc_cam{i}.yaml",
+                                "--calib", f"{REPO}/calib/{sequences[i]}.yaml",
                                 "--log", f"{out}/quality_r{i}.jsonl", "--frames-dir", f"{out}/frames/r{i}"], **py),
             Node(package="rtabmap_odom", executable="stereo_odometry", namespace=ns,
                  parameters=[{"frame_id": "camera_link", "publish_tf": False, "approx_sync": False,
@@ -74,6 +75,7 @@ def generate_launch_description():
         DeclareLaunchArgument("rate", default_value="0.5"),
         DeclareLaunchArgument("skip", default_value="2"),
         DeclareLaunchArgument("robots", default_value="3"),
+        DeclareLaunchArgument("sequences", default_value=DEFAULT_SEQUENCES, description="EuRoC sequence per robot"),
         DeclareLaunchArgument("perturb", default_value="", description="failure injection, see euroc_replay.py"),
         DeclareLaunchArgument("odom_reset", default_value="3", description="RTAB-Map Odom/ResetCountdown"),
         OpaqueFunction(function=setup),
