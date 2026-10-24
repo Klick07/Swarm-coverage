@@ -18,8 +18,10 @@ echo "run=$RUN rate=$RATE skip=$SKIP seqs=$SEQS perturb=$PERTURB start=$(date -I
 
 ( while sleep 30; do echo "== $(date +%T)"; top -b -n1 -o %CPU | sed -n 8,14p | awk '{print $9, $10, $12}'; free -m | sed -n 2,3p; done ) > "$OUT/cpu.log" &
 MON=$!
+# ros2 launch rejects an empty "perturb:=", so only pass it when set.
+EXTRA=(); [ -n "$PERTURB" ] && EXTRA=(perturb:="$PERTURB")
 timeout "$MAX" ros2 launch launch/euroc_swarm.launch.py run:="$RUN" rate:="$RATE" skip:="$SKIP" robots:=3 \
-  sequences:="$SEQS" perturb:="$PERTURB" > "$OUT/launch.log" 2>&1
+  sequences:="$SEQS" "${EXTRA[@]}" > "$OUT/launch.log" 2>&1
 kill $MON
 cp -r "$HOME/runs/cslam" "$OUT/cslam_logs" 2>/dev/null || true
 echo "end=$(date -Is)" >> "$OUT/params.txt"
