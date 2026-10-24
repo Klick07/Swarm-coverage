@@ -45,8 +45,14 @@ def state():
     decisions = rows("SELECT * FROM decisions WHERE action != 'none' ORDER BY id DESC LIMIT 40")
     for d in decisions:
         d["values"] = json.loads(d.pop("values_json") or "null")
+    cameras = rows("SELECT * FROM cameras ORDER BY robot")
+    for c in cameras:
+        c["quality"] = json.loads(c["quality"])
+        last = rows("SELECT message, t FROM notifications WHERE camera=? ORDER BY id DESC LIMIT 1", c["robot"])
+        c["last_notification"] = last[0] if last else None
     return {
         "run": os.path.basename(RUN_DIR),
+        "cameras": cameras,
         "places": places,
         "trajectories": trajectories,
         "notifications": rows("SELECT * FROM notifications ORDER BY id DESC LIMIT 40"),
@@ -55,6 +61,16 @@ def state():
         "counts": rows("SELECT state, COUNT(*) AS n FROM overlaps GROUP BY state"),
         "ignored": rows("SELECT COUNT(*) AS n FROM decisions WHERE trigger='overlap_rejected_by_swarm_slam'")[0]["n"],
     }
+
+
+@app.get("/api/frame/{robot}")
+def frame(robot: int):
+    """The rectified left image (OpenCV 5 front end output) the coordinator is processing now."""
+    r = rows("SELECT stamp_ns FROM cameras WHERE robot=?", robot)
+    path = Path(f"{RUN_DIR}/frames/r{robot}/{r[0]['stamp_ns']}.jpg") if r else None
+    if path is None or not path.exists():
+        raise HTTPException(404, "no frame yet")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/approve/{overlap_id}")

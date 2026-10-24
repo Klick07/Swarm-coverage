@@ -169,6 +169,8 @@ class Coordinator:
         r = ev["robot"]
         self.window[r].append(ev)
         q = self.get_quality(r)
+        if ev.get("passed", True):  # only passed frames are saved as JPEGs by the front end
+            self.store.set_camera(r, ev["stamp_ns"], q)
         t = ev["stamp_ns"] / 1e9
         if len(self.window[r]) < WINDOW or not q["weak"] or t - self.last_alert.get(r, -1e9) < QUALITY_COOLDOWN_S:
             return

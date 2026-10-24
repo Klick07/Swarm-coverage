@@ -57,6 +57,25 @@ th, td { text-align: left; padding: 5px 8px 5px 0; border-bottom: 1px solid var(
 th { color: var(--text-secondary); font-weight: 600; }
 td.num { font-variant-numeric: tabular-nums; }
 .wide { grid-column: 1 / -1; }
+.cams { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 860px) { .cams { grid-template-columns: minmax(0, 1fr); } }
+.cam { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-0); }
+.cam.weak { border-color: var(--status-warning); box-shadow: 0 0 0 1px var(--status-warning); }
+.cam-img { position: relative; aspect-ratio: 752 / 480; background: #000; }
+.cam-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-img .none { position: absolute; inset: 0; display: grid; place-items: center; color: #8e8d86; font-size: 12px; }
+.cam-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 0; }
+.cam-head b { font-size: 14px; }
+.cam-head .seq { color: var(--text-muted); font-size: 12px; }
+.chip { margin-left: auto; font-size: 12px; border-radius: 10px; padding: 1px 8px; border: 1px solid var(--border); white-space: nowrap; }
+.chip.ok::before { content: "✓ "; color: var(--status-good); font-weight: 700; }
+.chip.weak { background: var(--warn-bg); }
+.chip.weak::before { content: "▲ "; color: var(--status-warning); }
+.cam-vals { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 10px; font-size: 12px; color: var(--text-secondary); }
+.cam-vals b { color: var(--text-primary); font-variant-numeric: tabular-nums; font-weight: 600; }
+.cam-msg { padding: 0 10px 10px; font-size: 12px; color: var(--text-primary); min-height: 2.9em; }
+.cam-msg .t { margin-right: 6px; }
+:root { --status-good: #0ca30c; --status-warning: #fab219; }
 </style>
 </head>
 <body>
@@ -65,6 +84,10 @@ td.num { font-variant-numeric: tabular-nums; }
   <span class="sub" id="run">loading…</span>
 </header>
 <main>
+  <section class="wide">
+    <h2>Live camera views (rectified by the OpenCV 5 front end)</h2>
+    <div class="cams" id="cams"></div>
+  </section>
   <section>
     <h2>Merged map</h2>
     <div class="stats" id="stats"></div>
@@ -94,6 +117,48 @@ td.num { font-variant-numeric: tabular-nums; }
 </main>
 <script>
 const CELL = 2.0;
+const SEQ = ["EuRoC MH_01", "EuRoC MH_02", "EuRoC MH_03"];
+const WEAK_BLUR = 90, WEAK_TRACK = 0.5;
+
+// Build the three tiles once; refresh() only updates their contents.
+const buildCameraTiles = () => document.getElementById("cams").innerHTML = [0, 1, 2].map(r => `
+  <div class="cam" id="cam${r}">
+    <div class="cam-head"><span class="dot" style="background:${color(r)}"></span><b>Camera ${r}</b>
+      <span class="seq">${SEQ[r]}</span><span class="chip" id="chip${r}">waiting</span></div>
+    <div class="cam-vals" id="vals${r}"></div>
+    <div class="cam-img"><img id="img${r}" alt="Camera ${r} current frame"><div class="none" id="none${r}">No frame yet</div></div>
+    <div class="cam-vals cam-msg" id="msg${r}"></div>
+  </div>`).join("");
+
+const loading = [false, false, false];
+function refreshFrames() {
+  for (const r of [0, 1, 2]) {
+    if (loading[r]) continue;  // swap in a frame only after it has fully loaded: no flicker
+    loading[r] = true;
+    const next = new Image();
+    next.onload = () => { document.getElementById(`img${r}`).src = next.src; document.getElementById(`none${r}`).style.display = "none"; loading[r] = false; };
+    next.onerror = () => { loading[r] = false; };
+    next.src = `/api/frame/${r}?t=${Date.now()}`;
+  }
+}
+
+function renderCameras(s) {
+  for (const c of s.cameras) {
+    const q = c.quality || {}, r = c.robot;
+    const fmt = (v, d) => v == null ? "–" : Number(v).toFixed(d);
+    document.getElementById(`cam${r}`).classList.toggle("weak", !!q.weak);
+    const chip = document.getElementById(`chip${r}`);
+    chip.className = "chip " + (q.weak ? "weak" : "ok");
+    chip.textContent = q.weak ? "Tracking weak" : "Tracking OK";
+    document.getElementById(`vals${r}`).innerHTML =
+      `<span>Blur <b>${fmt(q.blur, 0)}</b> <span class="t">(weak &lt; ${WEAK_BLUR})</span></span>` +
+      `<span>Track inliers <b>${fmt(q.track_inliers, 2)}</b> <span class="t">(weak &lt; ${WEAK_TRACK})</span></span>` +
+      `<span>Features <b>${fmt(q.features, 0)}</b></span>`;
+    const m = c.last_notification;
+    document.getElementById(`msg${r}`).innerHTML = m
+      ? `<span class="t">${hhmmss(m.t)}</span>${esc(m.message)}` : '<span class="empty">No message to this walker yet.</span>';
+  }
+}
 const color = r => `var(--robot-${r})`;
 const hhmmss = t => new Date(t * 1000).toLocaleTimeString([], {hour12: false});
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -126,7 +191,7 @@ function drawMap(s) {
 }
 
 function render(s) {
-  document.getElementById("run").textContent = `Run ${s.run} · EuRoC replay · updates every 2 s`;
+  document.getElementById("run").textContent = `Run ${s.run} · EuRoC replay · live`;
   const n = st => (s.counts.find(c => c.state === st) || {n: 0}).n;
   const covered = s.places.filter(p => p.status === "covered").length;
   document.getElementById("stats").innerHTML = [
@@ -134,6 +199,7 @@ function render(s) {
     [n("applied"), "verified overlaps"], [n("pending"), "awaiting approval"], [s.ignored, "closures Swarm-SLAM rejected"],
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
   drawMap(s);
+  renderCameras(s);
   document.getElementById("pending").innerHTML = s.pending.length ? s.pending.map(o => `
     <div class="card"><p><b>Overlap #${o.overlap_id}</b>: camera ${o.a} and camera ${o.b}, ${esc(o.place_id)}.<br>
       OpenCV 5 found only <b>${o.cv_inliers}</b> geometric inliers (needs 50), so coverage is on hold.</p>
@@ -169,8 +235,11 @@ async function answer(id, ok, retry = true) {
 async function refresh() {
   try { render(await (await fetch("/api/state")).json()); } catch (e) { console.error(e); }
 }
+buildCameraTiles();
 refresh();
-setInterval(refresh, 2000);
+setInterval(refresh, 1000);
+refreshFrames();
+setInterval(refreshFrames, 500);
 </script>
 </body>
 </html>

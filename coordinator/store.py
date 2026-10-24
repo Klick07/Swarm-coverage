@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, camera INTEGER, trigger TEXT, values_json TEXT,
   decision TEXT, action TEXT, reason TEXT, source TEXT);
 CREATE TABLE IF NOT EXISTS trajectories (robot INTEGER PRIMARY KEY, points TEXT, t REAL);
+CREATE TABLE IF NOT EXISTS cameras (robot INTEGER PRIMARY KEY, stamp_ns INTEGER, quality TEXT, t REAL);
 """
 
 
@@ -80,6 +81,11 @@ class Store:
             "INSERT INTO decisions (t, camera, trigger, values_json, decision, action, reason, source) "
             "VALUES (?,?,?,?,?,?,?,?)",
             (time.time(), camera, trigger, json.dumps(values), decision, action, reason, source))
+
+    def set_camera(self, robot, stamp_ns, quality):
+        """The frame the coordinator is looking at now, for the dashboard's live camera tiles."""
+        self.db.execute("INSERT OR REPLACE INTO cameras VALUES (?,?,?,?)",
+                        (robot, stamp_ns, json.dumps(quality), time.time()))
 
     def set_trajectory(self, robot, points):
         self.db.execute("INSERT OR REPLACE INTO trajectories VALUES (?,?,?)",
