@@ -209,7 +209,8 @@ function render(s) {
   if (pendingKey !== lastPendingKey) { lastPendingKey = pendingKey;
   document.getElementById("pending").innerHTML = s.pending.length ? s.pending.map(o => `
     <div class="card"><p><b>Overlap #${o.overlap_id}</b>: camera ${o.a} and camera ${o.b}, ${esc(o.place_id)}.<br>
-      OpenCV 5 found only <b>${o.cv_inliers}</b> geometric inliers (needs 50), so coverage is on hold.</p>
+      OpenCV 5: <b>${o.cv_inliers}</b> geometric inliers (auto-approve needs 50), covering
+      <b>${Math.round((o.cv_spread || 0) * 100)}%</b> of the image (needs 10%). Coverage is on hold.</p>
       <figure class="pair"><img src="/api/overlap/${o.overlap_id}/matches" alt="Camera ${o.a} and camera ${o.b} keyframes with ${o.cv_inliers} inlier matches">
         <figcaption>Left: camera ${o.a} · right: camera ${o.b} · green lines = the ${o.cv_inliers} matches OpenCV 5 accepted.
         Same place? Approve. Different place? Reject.</figcaption></figure>

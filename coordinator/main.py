@@ -28,6 +28,11 @@ CELL_M = 2.0              # place = 2 m grid cell on the merged map's ground pla
 # keeps 83% of Swarm-SLAM-accepted closures (median 210 inliers), passes 0.7% of 150 random
 # cross-robot pairs >5 m apart (median 12).
 MIN_INLIERS = 50
+# Failure case "similar-looking places" (eval/similar_places.py, run d): the 6 far-apart pairs
+# (>5 m in ground truth) that look most alike all had 51-99 inliers, but their matches crowded
+# into one patch (same object seen from far away). Requiring inliers to span >= 10% of each image
+# keeps 19/20 true overlaps with >= 50 inliers and stops 4/6 of those look-alikes.
+MIN_SPREAD = 0.10
 
 
 class Coordinator:
@@ -82,17 +87,18 @@ class Coordinator:
         else:
             os.makedirs(f"{self.run}/matches", exist_ok=True)
             res = verify_pair(*imgs, draw_path=f"{self.run}/matches/overlap_{o['overlap_id']}.jpg")
-        res["confidence"] = "high" if res["inliers"] >= MIN_INLIERS else "low"
-        res["min_inliers"] = MIN_INLIERS
+        res["confidence"] = "high" if res["inliers"] >= MIN_INLIERS and res["spread"] >= MIN_SPREAD else "low"
+        res["min_inliers"], res["min_spread"] = MIN_INLIERS, MIN_SPREAD
         # The model once cited invented inlier-ratio thresholds; state the actual rule.
-        res["confidence_rule"] = f"high if inliers >= {MIN_INLIERS}; inlier_ratio is informational only"
+        res["confidence_rule"] = (f"high if inliers >= {MIN_INLIERS} and spread >= {MIN_SPREAD}; "
+                                  "inlier_ratio is informational only")
         # Explicit roles: in replay euroc3_r025_d the model notified the lower-numbered camera in
         # 2 of 24 overlaps where camera 2 arrived first. The facts now come from the tool.
         res["arrived_first"], res["arrived_second"] = o["a"], o["b"]
         res["if_covered_notify"] = {"camera": o["b"],
                                     "message": f"Area covered by camera {o['a']}, camera {o['b']} move on."}
         self.store.set_overlap(o["overlap_id"], cv_inliers=res["inliers"], cv_ratio=res["inlier_ratio"],
-                               confidence=res["confidence"])
+                               cv_spread=res["spread"], confidence=res["confidence"])
         self.ctx["values"] = {**self.ctx.get("values", {}), "opencv": res}
         return res
 
@@ -206,7 +212,8 @@ class Coordinator:
             self.mark_covered(oid)
             self.notify(b, f"Area covered by camera {a}, camera {b} move on.")
         else:
-            self.request_approval(oid, f"OpenCV 5 inliers {res['inliers']} < {MIN_INLIERS}")
+            self.request_approval(oid, f"OpenCV 5 inliers {res['inliers']} (need {MIN_INLIERS}), "
+                                       f"spread {res['spread']} (need {MIN_SPREAD})")
 
     def _decide(self, camera, text, rules):
         if self.agent:

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS places (
   last_seen REAL, status TEXT);
 CREATE TABLE IF NOT EXISTS overlaps (
   overlap_id INTEGER PRIMARY KEY AUTOINCREMENT, a INTEGER, ka INTEGER, b INTEGER, kb INTEGER,
-  place_id TEXT, cslam_success INTEGER, cv_inliers INTEGER, cv_ratio REAL, confidence TEXT,
+  place_id TEXT, cslam_success INTEGER, cv_inliers INTEGER, cv_ratio REAL, cv_spread REAL, confidence TEXT,
   state TEXT, created REAL, resolved REAL, resolved_by TEXT);
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, camera INTEGER, message TEXT, overlap_id INTEGER);

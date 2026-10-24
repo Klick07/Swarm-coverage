@@ -21,14 +21,14 @@ Rules:
   using its number, unless get_quality shows it has already recovered.
 - Always finish with one log_decision call that states the decision and the deciding values.
 Be brief. Do not invent values or thresholds; only cite numbers returned by tools or given in
-the event. The only overlap threshold is min_inliers (see confidence_rule)."""
+the event. The only overlap thresholds are min_inliers and min_spread (see confidence_rule)."""
 
 TOOLS = [
     ("get_quality", "Latest OpenCV 5 quality summary for one camera (rolling window medians).",
      {"camera": {"type": "integer"}}, ["camera"]),
     ("get_overlaps", "Recent overlaps between cameras with their verification state.", {}, []),
     ("verify_overlap", "Re-verify an overlap with OpenCV 5 (ORB + MAGSAC fundamental matrix) on the two "
-     "keyframe images. Returns inliers, inlier_ratio and confidence high/low.",
+     "keyframe images. Returns inliers, spread (image share the inliers cover) and confidence high/low.",
      {"overlap_id": {"type": "integer"}}, ["overlap_id"]),
     ("mark_covered", "Mark the overlap's place as covered. Refused for low-confidence overlaps "
      "until a human approves.", {"overlap_id": {"type": "integer"}}, ["overlap_id"]),

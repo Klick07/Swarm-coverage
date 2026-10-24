@@ -59,7 +59,8 @@ def setup(context):
                                   "robot_id": str(i), "namespace": ns, "max_nb_robots": str(robots)}.items()),
             ExecuteProcess(cmd=[CV5_PYTHON, "-m", "frontend.euroc_replay", "--robot", str(i),
                                 "--mav0", mav0, "--rate", rate, "--skip", skip,
-                                "--stamps", f"{out}/stamps_r{i}.csv"], **py),
+                                "--stamps", f"{out}/stamps_r{i}.csv",
+                                "--perturb", context.launch_configurations["perturb"]], **py),
         ]
     return actions
 
@@ -70,5 +71,6 @@ def generate_launch_description():
         DeclareLaunchArgument("rate", default_value="0.5"),
         DeclareLaunchArgument("skip", default_value="2"),
         DeclareLaunchArgument("robots", default_value="3"),
+        DeclareLaunchArgument("perturb", default_value="", description="failure injection, see euroc_replay.py"),
         OpaqueFunction(function=setup),
     ])

@@ -27,6 +27,13 @@ def verify_pair(img_a, img_b, ratio=0.8, draw_path=None):
         if mask is not None:
             inlier_matches = [m for m, keep in zip(good, mask.ravel()) if keep]
         res.update(inliers=len(inlier_matches), inlier_ratio=round(len(inlier_matches) / len(good), 3))
+        if len(inlier_matches) >= 3:
+            # Share of each image covered by the inliers' convex hull (the smaller of the two).
+            # Low = the matches crowd into one patch, e.g. the same object seen from 5+ m away.
+            keep = mask.ravel().astype(bool)
+            area = img_a.shape[0] * img_a.shape[1]
+            res["spread"] = round(min(cv2.contourArea(cv2.convexHull(p[keep])) / area for p in (pa, pb)), 3)
+    res.setdefault("spread", 0.0)
     if draw_path:
         vis = cv2.drawMatches(img_a, ka, img_b, kb, inlier_matches, None, matchColor=(80, 220, 120),
                               flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
