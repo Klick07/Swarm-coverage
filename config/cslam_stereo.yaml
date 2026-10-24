@@ -45,6 +45,8 @@
       enable_broadcast_tf_frames: true
     evaluation:
       enable_logs: true
+      # Off by default; without it pose_timestamps*.csv are empty and poses can't be matched to ground truth.
+      enable_pose_timestamps_recording: true
       log_folder: "/home/ubuntu/runs/cslam"
       enable_gps_recording: false
       gps_topic: "gps/fix"

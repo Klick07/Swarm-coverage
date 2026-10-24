@@ -43,9 +43,10 @@ def read_g2o(path):
     return poses
 
 
-def read_pose_times(run_logs):
+def read_pose_times(cslam_logs):
+    """Each robot writes its own pose_timestamps<N>.csv into its own log folder; keys are unique."""
     times = {}
-    for path in glob.glob(f"{run_logs}/pose_timestamps*.csv"):
+    for path in sorted(glob.glob(f"{cslam_logs}/**/pose_timestamps*.csv", recursive=True)):
         with open(path) as f:
             for r in csv.DictReader(f):
                 times[decode_key(int(r["vertice_id"]))] = int(r["sec"]) * 10**9 + int(r["nanosec"])
@@ -109,7 +110,7 @@ def main(run_dir, gt_dir):
     if not result_dirs:
         sys.exit(f"no optimized_global_pose_graph.g2o under {run_dir}/cslam_logs")
     logs = os.path.dirname(result_dirs[-1])  # latest write_logs() snapshot
-    times = read_pose_times(logs)
+    times = read_pose_times(f"{run_dir}/cslam_logs")
     metrics = {"cslam_log_folder": os.path.relpath(logs, run_dir)}
 
     pairs = {}  # kind -> robot -> list of (euroc_ts, est T, gt T)

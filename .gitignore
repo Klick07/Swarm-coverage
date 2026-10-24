@@ -4,3 +4,5 @@ __pycache__/
 calib/
 recordings/
 .DS_Store
+runs/
+gt/
