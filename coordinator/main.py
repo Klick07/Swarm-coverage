@@ -80,7 +80,8 @@ class Coordinator:
         if any(i is None for i in imgs):
             res = {"matches": 0, "inliers": 0, "inlier_ratio": 0.0, "note": "keyframe image missing"}
         else:
-            res = verify_pair(*imgs)
+            os.makedirs(f"{self.run}/matches", exist_ok=True)
+            res = verify_pair(*imgs, draw_path=f"{self.run}/matches/overlap_{o['overlap_id']}.jpg")
         res["confidence"] = "high" if res["inliers"] >= MIN_INLIERS else "low"
         res["min_inliers"] = MIN_INLIERS
         # The model once cited invented inlier-ratio thresholds; state the actual rule.

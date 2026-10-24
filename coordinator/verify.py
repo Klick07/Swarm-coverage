@@ -10,16 +10,26 @@ ORB = cv2.ORB_create(nfeatures=1500)
 MATCHER = cv2.BFMatcher(cv2.NORM_HAMMING)
 
 
-def verify_pair(img_a, img_b, ratio=0.8):
+def verify_pair(img_a, img_b, ratio=0.8, draw_path=None):
+    """Returns match/inlier counts; with draw_path, also saves both images side by side
+    with the inlier matches drawn, which is what a human approver looks at."""
     ka, da = ORB.detectAndCompute(img_a, None)
     kb, db = ORB.detectAndCompute(img_b, None)
-    if da is None or db is None or len(ka) < 8 or len(kb) < 8:
-        return {"matches": 0, "inliers": 0, "inlier_ratio": 0.0}
-    good = [m for m, n in (p for p in MATCHER.knnMatch(da, db, k=2) if len(p) == 2) if m.distance < ratio * n.distance]
-    if len(good) < 8:
-        return {"matches": len(good), "inliers": 0, "inlier_ratio": 0.0}
-    pa = np.float32([ka[m.queryIdx].pt for m in good])
-    pb = np.float32([kb[m.trainIdx].pt for m in good])
-    _, mask = cv2.findFundamentalMat(pa, pb, cv2.USAC_MAGSAC, 1.0, 0.999, 10000)
-    inliers = 0 if mask is None else int(mask.sum())
-    return {"matches": len(good), "inliers": inliers, "inlier_ratio": round(inliers / len(good), 3)}
+    good, inlier_matches = [], []
+    res = {"matches": 0, "inliers": 0, "inlier_ratio": 0.0}
+    if da is not None and db is not None and len(ka) >= 8 and len(kb) >= 8:
+        good = [m for m, n in (p for p in MATCHER.knnMatch(da, db, k=2) if len(p) == 2) if m.distance < ratio * n.distance]
+        res["matches"] = len(good)
+    if len(good) >= 8:
+        pa = np.float32([ka[m.queryIdx].pt for m in good])
+        pb = np.float32([kb[m.trainIdx].pt for m in good])
+        _, mask = cv2.findFundamentalMat(pa, pb, cv2.USAC_MAGSAC, 1.0, 0.999, 10000)
+        if mask is not None:
+            inlier_matches = [m for m, keep in zip(good, mask.ravel()) if keep]
+        res.update(inliers=len(inlier_matches), inlier_ratio=round(len(inlier_matches) / len(good), 3))
+    if draw_path:
+        vis = cv2.drawMatches(img_a, ka, img_b, kb, inlier_matches, None, matchColor=(80, 220, 120),
+                              flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+        cv2.imwrite(draw_path, cv2.resize(vis, None, fx=0.6, fy=0.6, interpolation=cv2.INTER_AREA),
+                    [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return res

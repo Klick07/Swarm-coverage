@@ -73,6 +73,15 @@ def frame(robot: int):
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/overlap/{overlap_id}/matches")
+def overlap_matches(overlap_id: int):
+    """Both keyframes side by side with the OpenCV 5 inlier matches the decision rests on."""
+    path = Path(f"{RUN_DIR}/matches/overlap_{overlap_id}.jpg")
+    if not path.exists():
+        raise HTTPException(404, "no match image")
+    return FileResponse(path, media_type="image/jpeg")
+
+
 @app.post("/api/approve/{overlap_id}")
 def approve(overlap_id: int, approve: bool, x_approval_token: str = Header(default="")):
     # The dashboard is public through the tunnel: viewing is open, answering needs the token.

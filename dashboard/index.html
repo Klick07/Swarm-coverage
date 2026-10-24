@@ -76,6 +76,9 @@ td.num { font-variant-numeric: tabular-nums; }
 .cam-msg { padding: 0 10px 10px; font-size: 12px; color: var(--text-primary); min-height: 2.9em; }
 .cam-msg .t { margin-right: 6px; }
 :root { --status-good: #0ca30c; --status-warning: #fab219; }
+.pair { margin: 0 0 10px; }
+.pair img { width: 100%; display: block; border-radius: 4px; background: #000; }
+.pair figcaption { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -131,6 +134,7 @@ const buildCameraTiles = () => document.getElementById("cams").innerHTML = [0, 1
   </div>`).join("");
 
 const loading = [false, false, false];
+let lastPendingKey = null;
 function refreshFrames() {
   for (const r of [0, 1, 2]) {
     if (loading[r]) continue;  // swap in a frame only after it has fully loaded: no flicker
@@ -200,12 +204,19 @@ function render(s) {
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
   drawMap(s);
   renderCameras(s);
+  // Redraw cards only when the pending set changes, so the match images don't reload every second.
+  const pendingKey = s.pending.map(o => o.overlap_id).join(",");
+  if (pendingKey !== lastPendingKey) { lastPendingKey = pendingKey;
   document.getElementById("pending").innerHTML = s.pending.length ? s.pending.map(o => `
     <div class="card"><p><b>Overlap #${o.overlap_id}</b>: camera ${o.a} and camera ${o.b}, ${esc(o.place_id)}.<br>
       OpenCV 5 found only <b>${o.cv_inliers}</b> geometric inliers (needs 50), so coverage is on hold.</p>
+      <figure class="pair"><img src="/api/overlap/${o.overlap_id}/matches" alt="Camera ${o.a} and camera ${o.b} keyframes with ${o.cv_inliers} inlier matches">
+        <figcaption>Left: camera ${o.a} · right: camera ${o.b} · green lines = the ${o.cv_inliers} matches OpenCV 5 accepted.
+        Same place? Approve. Different place? Reject.</figcaption></figure>
       <button class="approve" onclick="answer(${o.overlap_id}, true)">Approve</button>
       <button class="reject" onclick="answer(${o.overlap_id}, false)">Reject</button></div>`).join("")
     : '<p class="empty">Nothing waiting.</p>';
+  }
   document.getElementById("feed").innerHTML = s.notifications.map(m =>
     `<li><span class="dot" style="background:${color(m.camera)}"></span><span class="t">${hhmmss(m.t)}</span><span>${esc(m.message)}</span></li>`
   ).join("") || '<li class="empty">No notifications yet.</li>';
