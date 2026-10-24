@@ -76,6 +76,15 @@ td.num { font-variant-numeric: tabular-nums; }
 .cam-msg { padding: 0 10px 10px; font-size: 12px; color: var(--text-primary); min-height: 2.9em; }
 .cam-msg .t { margin-right: 6px; }
 :root { --status-good: #0ca30c; --status-warning: #fab219; }
+:root { --crossed-line: #8e8d86; }
+.box.hatch { border: 1px dashed var(--crossed-line);
+  background: repeating-linear-gradient(45deg, var(--crossed-line) 0 1.5px, transparent 1.5px 4px); }
+.alert { display: none; position: sticky; top: 0; z-index: 5; margin: 0 16px 12px; padding: 10px 14px;
+  border-radius: 6px; background: var(--warn-bg); border: 1px solid var(--status-warning);
+  align-items: center; gap: 12px; flex-wrap: wrap; }
+.alert.on { display: flex; }
+.alert b::before { content: "▲ "; color: var(--status-warning); }
+.alert button { padding: 4px 12px; }
 .pair { margin: 0 0 10px; }
 .pair img { width: 100%; display: block; border-radius: 4px; background: #000; }
 .pair figcaption { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
@@ -86,6 +95,12 @@ td.num { font-variant-numeric: tabular-nums; }
   <h1>Swarm coverage</h1>
   <span class="sub" id="run">loading…</span>
 </header>
+<div class="alert" id="alert" role="alert">
+  <b id="alert-text">Approval needed</b>
+  <span class="sub">Coverage is on hold until you answer.</span>
+  <button class="approve" onclick="document.getElementById('pending').scrollIntoView({behavior: 'smooth'})">Review now</button>
+  <button class="reject" id="alerts-btn" onclick="enableAlerts()">Enable desktop alerts + sound</button>
+</div>
 <main>
   <section class="wide">
     <h2>Live camera views (rectified by the OpenCV 5 front end)</h2>
@@ -100,6 +115,7 @@ td.num { font-variant-numeric: tabular-nums; }
       <span><span class="sw" style="background:var(--robot-1)"></span>Camera 1</span>
       <span><span class="sw" style="background:var(--robot-2)"></span>Camera 2</span>
       <span><span class="box" style="background:var(--covered)"></span>Covered (verified overlap)</span>
+      <span><span class="box hatch"></span>Paths cross, not verified yet</span>
       <span><span class="box" style="border:1px solid var(--seen-line)"></span>Seen by one camera</span>
     </div>
   </section>
@@ -181,29 +197,38 @@ function drawMap(s) {
   const X = x => pad + (x - x0) * k, Y = z => H - pad - (z - z0) * k;
   let out = "";
   for (const c of cells) {
-    const covered = c.status === "covered";
-    out += `<rect x="${X(c.x) + 1}" y="${Y(c.z + CELL) + 1}" width="${CELL * k - 2}" height="${CELL * k - 2}" rx="3"
-      fill="${covered ? "var(--covered)" : "none"}" stroke="${covered ? "none" : "var(--seen-line)"}">
-      <title>${esc(c.place_id)}: ${covered ? "covered" : "seen"} by camera ${c.cameras.join(", ")}; ${c.verified_matches} verified overlap(s)</title></rect>`;
+    // covered = verified overlap (Swarm-SLAM closure + OpenCV 5 check); crossed = 2+ cameras'
+    // merged paths pass through, but nothing verified there yet; seen = one camera only.
+    const state = c.status === "covered" ? "covered" : c.cameras.length >= 2 ? "crossed" : "seen";
+    const style = {covered: 'fill="var(--covered)" stroke="none"',
+                   crossed: 'fill="url(#hatch)" stroke="var(--crossed-line)" stroke-dasharray="4 3"',
+                   seen: 'fill="none" stroke="var(--seen-line)"'}[state];
+    const label = {covered: "covered (verified overlap)", crossed: "paths cross, not verified", seen: "seen by one camera"}[state];
+    out += `<rect x="${X(c.x) + 1}" y="${Y(c.z + CELL) + 1}" width="${CELL * k - 2}" height="${CELL * k - 2}" rx="3" ${style}>
+      <title>${esc(c.place_id)}: ${label}; cameras ${c.cameras.join(", ")}; ${c.verified_matches} verified overlap(s)</title></rect>`;
   }
   for (const [r, line] of Object.entries(s.trajectories)) {
     const d = line.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
     out += `<path d="${d}" fill="none" stroke="var(--surface-1)" stroke-width="4" stroke-linejoin="round"/>
             <path d="${d}" fill="none" stroke="${color(r)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><title>Camera ${r}</title></path>`;
   }
-  svg.innerHTML = out;
+  svg.innerHTML = `<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="var(--crossed-line)" stroke-width="1.5"/></pattern></defs>` + out;
 }
 
 function render(s) {
   document.getElementById("run").textContent = `Run ${s.run} · EuRoC replay · live`;
   const n = st => (s.counts.find(c => c.state === st) || {n: 0}).n;
   const covered = s.places.filter(p => p.status === "covered").length;
+  const crossed = s.places.filter(p => p.status !== "covered" && p.cameras.length >= 2).length;
   document.getElementById("stats").innerHTML = [
-    [covered, "areas covered"], [s.places.length - covered, "areas seen by one camera"],
+    [covered, "areas covered (verified)"], [crossed, "paths cross, not verified"],
+    [s.places.length - covered - crossed, "seen by one camera"],
     [n("applied"), "verified overlaps"], [n("pending"), "awaiting approval"], [s.ignored, "closures Swarm-SLAM rejected"],
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
   drawMap(s);
   renderCameras(s);
+  announce(s.pending);
   // Redraw cards only when the pending set changes, so the match images don't reload every second.
   const pendingKey = s.pending.map(o => o.overlap_id).join(",");
   if (pendingKey !== lastPendingKey) { lastPendingKey = pendingKey;
@@ -227,6 +252,36 @@ function render(s) {
       <td>${esc(d.action)}</td><td class="num">${q.blur ?? ""}</td><td class="num">${q.track_inliers ?? ""}</td>
       <td class="num">${q.inliers ?? ""}</td><td>${esc(d.reason)}</td></tr>`;
   }).join("");
+}
+
+// Approval requests must not be missed: banner, tab title, and (opt-in) desktop alert + beep.
+let alertsOn = false, announced = new Set();
+function enableAlerts() {
+  alertsOn = true;
+  document.getElementById("alerts-btn").textContent = "Alerts on";
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  beep();  // the click also unlocks audio playback in the browser
+}
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.25);
+  } catch (e) {}
+}
+function announce(pending) {
+  const n = pending.length;
+  document.getElementById("alert").classList.toggle("on", n > 0);
+  document.getElementById("alert-text").textContent = n === 1 ? "1 approval needed" : `${n} approvals needed`;
+  document.title = n ? `(${n}) Approval needed · Swarm Coverage` : "Swarm Coverage";
+  for (const o of pending) {
+    if (announced.has(o.overlap_id)) continue;
+    announced.add(o.overlap_id);
+    if (!alertsOn) continue;
+    beep();
+    if ("Notification" in window && Notification.permission === "granted")
+      new Notification("Approval needed", {body: `Overlap #${o.overlap_id}: camera ${o.a} and camera ${o.b}, weak evidence (${o.cv_inliers} inliers)`});
+  }
 }
 
 function token(reset) {

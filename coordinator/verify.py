@@ -23,6 +23,9 @@ def verify_pair(img_a, img_b, ratio=0.8, draw_path=None):
     if len(good) >= 8:
         pa = np.float32([ka[m.queryIdx].pt for m in good])
         pb = np.float32([kb[m.trainIdx].pt for m in good])
+        # Fixed seed: MAGSAC samples randomly, and the same pair once gave 23 inliers / 2.4% spread
+        # on one run and 26 / 11% on another. Decisions in the log must be reproducible.
+        cv2.setRNGSeed(0)
         _, mask = cv2.findFundamentalMat(pa, pb, cv2.USAC_MAGSAC, 1.0, 0.999, 10000)
         if mask is not None:
             inlier_matches = [m for m, keep in zip(good, mask.ravel()) if keep]
