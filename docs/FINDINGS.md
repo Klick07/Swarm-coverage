@@ -244,6 +244,51 @@ left-right ORB matches on the same row with positive disparity is 0.000 raw
 - **The "odometry only" joint ATE is flattering:** all MH flights take off
   from the same spot, so unmerged odometry frames line up by coincidence. The
   fair comparison is per-robot ATE plus joint ATE after merging.
+- Figure: `docs/figures/merge_before_after.png` (`python -m eval.plot_merge`).
 - Joint ATE = one SE(3) alignment for all 3 robots against Leica ground truth (the
   shared frame across MH sequences). Ground truth is converted from body to cam0 with
   EuRoC's T_BS. The small rectification rotation R1 is ignored (less than 1°).
+
+## 10. Phase 5 coordinator — MEASURED 2026-10-24 (replay of run euroc3_r025_d)
+
+**Bedrock on this account:** Anthropic models are refused ("not available for this
+account"; free plan). Amazon Nova works (Micro, Lite, 2 Lite, all with tool calling).
+The coordinator uses `us.amazon.nova-2-lite-v1:0`.
+
+Pipeline: ROS -> `coordinator/recorder.py` -> `events.jsonl` -> `coordinator/main.py`
+(Bedrock agent + tools) -> `coverage.db` (SQLite; DynamoDB is blocked) -> `dashboard/`.
+
+Run d events: 4,711 quality, 1,384 keyframes, 261 merged-pose snapshots, 177
+inter-robot closure candidates (Swarm-SLAM: 24 accepted, 153 rejected).
+
+**Thresholds** (tuned on recorded runs, not copied from elsewhere):
+- Weak tracking: 6-frame median blur < 90 (about the 5th percentile, run c) or track_inliers
+  < 0.50 (between the 1st and 5th percentile); 20 s cooldown per camera.
+- Overlap re-verification (OpenCV 5 ORB + MAGSAC F-matrix on the two keyframes):
+  confidence high if inliers >= 50. On run d, Swarm-SLAM-accepted closures have median
+  210 inliers (83% >= 50); 150 random cross-robot pairs >5 m apart have median 12, and
+  0.7% are >= 50.
+- Frame-dropping gate before SLAM: off. Even the worst frames keep 300+ features,
+  and dropping frames breaks odometry, so the coordinator acts on quality instead.
+
+**Result (final Bedrock replay):** 24 overlaps -> 20 covered automatically, 4 held for
+human approval (25–47 inliers); 15 "slow down" notifications (camera 2: 7, cameras 0/1: 4
+each); 153 Swarm-SLAM-rejected closures logged, not acted on; 9 areas covered, 28 seen
+by one camera. Overlap notifications identical to the rule-based reference. 121 Nova
+calls, about 201k input / 6.7k output tokens, 0 fallbacks.
+
+**Agent failures found and fixed (keep for the report):**
+1. Wrong recipient: in 2 of 24 overlaps where camera 2 arrived before camera 1, the model
+   notified camera 2. Fix: verify_overlap returns explicit arrived_first/arrived_second
+   and the exact notification. Afterwards: 0 of 24 wrong.
+2. Invented thresholds in reasons ("inlier ratio 0.49 < 0.5"); no such rule exists.
+   Fix: the tool returns confidence_rule; the prompt names min_inliers as the only
+   threshold. Afterwards: no reason cites a ratio threshold.
+3. A Bedrock call hung for 17 min in an SSL read (network drop). Fix: 10 s connect,
+   30 s read timeouts, 3 retries; on failure that event falls back to the rules and
+   the log says so.
+
+**Human control:** `mark_covered` refuses low-confidence overlaps in code, so neither
+the model nor the rules can change coverage without approval (test:
+`tests/test_coordinator.py`). Verified on the dashboard: Approve #5 -> coverage updated,
+camera 2 notified, logged as source=human; Reject #10 -> coverage unchanged, logged.

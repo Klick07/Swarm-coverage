@@ -4,3 +4,6 @@ pyyaml==6.0.3
 pytest==8.4.2
 scipy==1.18.1  # Mac/Python 3.15; EC2 uses 1.17.1 (see scripts/ec2_setup.sh)
 matplotlib==3.11.2
+boto3
+fastapi==0.121.1
+uvicorn==0.38.0

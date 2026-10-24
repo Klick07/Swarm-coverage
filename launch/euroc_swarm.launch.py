@@ -31,14 +31,15 @@ def setup(context):
     # With a rotated camera_link->camera_optical TF, Swarm-SLAM's inter-robot loop closures came
     # out in the optical frame while odometry was in camera_link, so whole robots were merged
     # rotated by exactly that 120 deg (run euroc3_r025_b). Its own KITTI launch uses identity too.
-    actions = []
+    actions = [ExecuteProcess(cmd=[CV5_PYTHON, "-m", "coordinator.recorder", "--robots", str(robots),
+                                   "--out", f"{out}/events.jsonl"], **py)]
     for i in range(robots):
         ns, mav0 = f"/r{i}", f"{DATA}/{SEQUENCES[i]}/mav0"
         cam = f"{ns}/stereo_camera"
         actions += [
             ExecuteProcess(cmd=[CV5_PYTHON, "-m", "frontend.node", "--robot", str(i),
                                 "--calib", f"{REPO}/calib/euroc_cam{i}.yaml",
-                                "--log", f"{out}/quality_r{i}.jsonl"], **py),
+                                "--log", f"{out}/quality_r{i}.jsonl", "--frames-dir", f"{out}/frames/r{i}"], **py),
             Node(package="rtabmap_odom", executable="stereo_odometry", namespace=ns,
                  parameters=[{"frame_id": "camera_link", "publish_tf": False, "approx_sync": False,
                               "wait_for_transform": 0.2, "qos": 1, "qos_camera_info": 1}],

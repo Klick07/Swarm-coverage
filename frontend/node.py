@@ -10,6 +10,7 @@ Usage: python -m frontend.node --robot 0 --calib calib/cam0.yaml --log runs/x/qu
 """
 import argparse
 import json
+import os
 import time
 
 import cv2
@@ -31,6 +32,10 @@ class FrontEnd(Node):
         self.scorer = QualityScorer()
         self.min_blur, self.min_features = args.min_blur, args.min_features
         self.log = open(args.log, "a", buffering=1)
+        # Rectified left images, named by stamp, so the coordinator can re-verify overlaps.
+        self.frames_dir = args.frames_dir
+        if self.frames_dir:
+            os.makedirs(self.frames_dir, exist_ok=True)
         ns = f"/r{args.robot}/stereo_camera"
         self.pub = {side: self.create_publisher(Image, f"{ns}/{side}/image_rect_color", 10)
                     for side in ("left", "right")}
@@ -53,7 +58,10 @@ class FrontEnd(Node):
             self.pub["right"].publish(to_msg(right, h))
             self.pub_info["left"].publish(camera_info(self.rect.P1, self.rect.size, h))
             self.pub_info["right"].publish(camera_info(self.rect.P2, self.rect.size, h))
-        record = {"robot": self.robot, "stamp_ns": msg_l.header.stamp.sec * 10**9 + msg_l.header.stamp.nanosec,
+        stamp_ns = msg_l.header.stamp.sec * 10**9 + msg_l.header.stamp.nanosec
+        if passed and self.frames_dir:
+            cv2.imwrite(f"{self.frames_dir}/{stamp_ns}.jpg", left, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        record = {"robot": self.robot, "stamp_ns": stamp_ns,
                   **scores, "passed": passed, "ms": round((time.perf_counter() - t0) * 1000, 1)}
         self.pub_q.publish(String(data=json.dumps(record)))
         self.log.write(json.dumps(record) + "\n")
@@ -64,6 +72,7 @@ def main():
     ap.add_argument("--robot", type=int, required=True)
     ap.add_argument("--calib", required=True)
     ap.add_argument("--log", required=True)
+    ap.add_argument("--frames-dir", default="")
     # Placeholder gates, deliberately permissive. Tune on recorded runs (spec Phase 5 step 4).
     ap.add_argument("--min-blur", type=float, default=0.0)
     ap.add_argument("--min-features", type=int, default=0)

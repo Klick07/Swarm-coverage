@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm Coverage</title>
+<style>
+:root {
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e3e1dc; --grid: #ecebe7;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7b7a75;
+  --robot-0: #2a78d6; --robot-1: #eb6834; --robot-2: #1baf7a;
+  --covered: #cfcdc6; --seen: transparent; --seen-line: #c3c1ba;
+  --action: #0b0b0b; --action-ink: #fcfcfb; --warn-bg: #fff4dc;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2c; --grid: #252523;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
+  --robot-0: #3987e5; --robot-1: #d95926; --robot-2: #199e70;
+  --covered: #3a3936; --seen-line: #4a4946; --action: #f0efec; --action-ink: #1a1a19; --warn-bg: #3a2f14;
+}}
+:root[data-theme="dark"] {
+  --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2c; --grid: #252523;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
+  --robot-0: #3987e5; --robot-1: #d95926; --robot-2: #199e70;
+  --covered: #3a3936; --seen-line: #4a4946; --action: #f0efec; --action-ink: #1a1a19; --warn-bg: #3a2f14;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 16px; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+h1 { font-size: 18px; margin: 0; }
+.sub { color: var(--text-secondary); }
+main { display: grid; gap: 16px; padding: 0 16px 24px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+@media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 14px; min-width: 0; }
+h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.stats { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 10px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--text-secondary); font-size: 12px; }
+svg { width: 100%; height: auto; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
+li { padding: 6px 0; border-bottom: 1px solid var(--grid); display: flex; gap: 8px; align-items: baseline; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+.t { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; flex: none; }
+.card { border: 1px solid var(--border); background: var(--warn-bg); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+.card p { margin: 0 0 8px; }
+button { font: inherit; border-radius: 6px; padding: 6px 14px; cursor: pointer; border: 1px solid var(--action); }
+.approve { background: var(--action); color: var(--action-ink); }
+.reject { background: transparent; color: var(--text-primary); margin-left: 6px; }
+.empty { color: var(--text-muted); }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { text-align: left; padding: 5px 8px 5px 0; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+.wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Swarm coverage</h1>
+  <span class="sub" id="run">loading…</span>
+</header>
+<main>
+  <section>
+    <h2>Merged map</h2>
+    <div class="stats" id="stats"></div>
+    <svg id="map" viewBox="0 0 600 420" role="img" aria-label="Top-down merged map with camera trajectories and coverage cells"></svg>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--robot-0)"></span>Camera 0</span>
+      <span><span class="sw" style="background:var(--robot-1)"></span>Camera 1</span>
+      <span><span class="sw" style="background:var(--robot-2)"></span>Camera 2</span>
+      <span><span class="box" style="background:var(--covered)"></span>Covered (verified overlap)</span>
+      <span><span class="box" style="border:1px solid var(--seen-line)"></span>Seen by one camera</span>
+    </div>
+  </section>
+  <section>
+    <h2>Waiting for a human</h2>
+    <div id="pending"></div>
+    <h2 style="margin-top:16px">Notifications to walkers</h2>
+    <ul id="feed"></ul>
+  </section>
+  <section class="wide">
+    <h2>Decision log (latest first)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Time</th><th>Camera</th><th>Trigger</th><th>Decided by</th><th>Action</th>
+        <th>Blur</th><th>Track inliers</th><th>OpenCV inliers</th><th>Reason</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const CELL = 2.0;
+const color = r => `var(--robot-${r})`;
+const hhmmss = t => new Date(t * 1000).toLocaleTimeString([], {hour12: false});
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function drawMap(s) {
+  const pts = Object.values(s.trajectories).flat();
+  const svg = document.getElementById("map");
+  if (!pts.length) { svg.innerHTML = '<text x="20" y="40" fill="currentColor">No merged poses yet</text>'; return; }
+  const cells = s.places.filter(p => p.place_id.startsWith("cell_")).map(p => {
+    const [, i, j] = p.place_id.split("_").map(Number); return {...p, x: i * CELL, z: j * CELL};
+  });
+  const xs = pts.map(p => p[0]).concat(cells.flatMap(c => [c.x, c.x + CELL]));
+  const zs = pts.map(p => p[1]).concat(cells.flatMap(c => [c.z, c.z + CELL]));
+  const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+  const W = 600, H = 420, pad = 16, k = Math.min((W - 2 * pad) / (x1 - x0 || 1), (H - 2 * pad) / (z1 - z0 || 1));
+  const X = x => pad + (x - x0) * k, Y = z => H - pad - (z - z0) * k;
+  let out = "";
+  for (const c of cells) {
+    const covered = c.status === "covered";
+    out += `<rect x="${X(c.x) + 1}" y="${Y(c.z + CELL) + 1}" width="${CELL * k - 2}" height="${CELL * k - 2}" rx="3"
+      fill="${covered ? "var(--covered)" : "none"}" stroke="${covered ? "none" : "var(--seen-line)"}">
+      <title>${esc(c.place_id)}: ${covered ? "covered" : "seen"} by camera ${c.cameras.join(", ")}; ${c.verified_matches} verified overlap(s)</title></rect>`;
+  }
+  for (const [r, line] of Object.entries(s.trajectories)) {
+    const d = line.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+    out += `<path d="${d}" fill="none" stroke="var(--surface-1)" stroke-width="4" stroke-linejoin="round"/>
+            <path d="${d}" fill="none" stroke="${color(r)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><title>Camera ${r}</title></path>`;
+  }
+  svg.innerHTML = out;
+}
+
+function render(s) {
+  document.getElementById("run").textContent = `Run ${s.run} · EuRoC replay · updates every 2 s`;
+  const n = st => (s.counts.find(c => c.state === st) || {n: 0}).n;
+  const covered = s.places.filter(p => p.status === "covered").length;
+  document.getElementById("stats").innerHTML = [
+    [covered, "areas covered"], [s.places.length - covered, "areas seen by one camera"],
+    [n("applied"), "verified overlaps"], [n("pending"), "awaiting approval"], [s.ignored, "closures Swarm-SLAM rejected"],
+  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  drawMap(s);
+  document.getElementById("pending").innerHTML = s.pending.length ? s.pending.map(o => `
+    <div class="card"><p><b>Overlap #${o.overlap_id}</b>: camera ${o.a} and camera ${o.b}, ${esc(o.place_id)}.<br>
+      OpenCV 5 found only <b>${o.cv_inliers}</b> geometric inliers (needs 50), so coverage is on hold.</p>
+      <button class="approve" onclick="answer(${o.overlap_id}, true)">Approve</button>
+      <button class="reject" onclick="answer(${o.overlap_id}, false)">Reject</button></div>`).join("")
+    : '<p class="empty">Nothing waiting.</p>';
+  document.getElementById("feed").innerHTML = s.notifications.map(m =>
+    `<li><span class="dot" style="background:${color(m.camera)}"></span><span class="t">${hhmmss(m.t)}</span><span>${esc(m.message)}</span></li>`
+  ).join("") || '<li class="empty">No notifications yet.</li>';
+  document.getElementById("log").innerHTML = s.decisions.map(d => {
+    const q = d.values?.opencv || {};
+    return `<tr><td class="num">${hhmmss(d.t)}</td><td>${d.camera}</td><td>${esc(d.trigger)}</td><td>${esc(d.source)}</td>
+      <td>${esc(d.action)}</td><td class="num">${q.blur ?? ""}</td><td class="num">${q.track_inliers ?? ""}</td>
+      <td class="num">${q.inliers ?? ""}</td><td>${esc(d.reason)}</td></tr>`;
+  }).join("");
+}
+
+async function answer(id, ok) {
+  const r = await fetch(`/api/approve/${id}?approve=${ok}`, {method: "POST"});
+  if (!r.ok) alert(await r.text());
+  refresh();
+}
+async function refresh() {
+  try { render(await (await fetch("/api/state")).json()); } catch (e) { console.error(e); }
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
