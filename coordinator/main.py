@@ -123,6 +123,9 @@ class Coordinator:
         return {"pending": True, "overlap_id": o["overlap_id"]}
 
     def notify(self, camera, message):
+        if "t_event" in self.ctx:  # measured decision latency: event handled -> notification
+            self.ctx["values"] = {**self.ctx.get("values", {}),
+                                  "decision_latency_s": round(time.time() - self.ctx["t_event"], 3)}
         self.store.notify(int(camera), message, self.ctx.get("overlap_id"))
         self._log(int(camera), "notify", f"notify: {message}")
         print(f"  -> camera {camera}: {message}")
@@ -216,6 +219,7 @@ class Coordinator:
                                        f"spread {res['spread']} (need {MIN_SPREAD})")
 
     def _decide(self, camera, text, rules):
+        self.ctx["t_event"] = time.time()
         if self.agent:
             self.ctx["source"] = "bedrock"
             try:
