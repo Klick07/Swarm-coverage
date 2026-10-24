@@ -216,5 +216,34 @@ Setup script: `scripts/ec2_setup.sh`.
   `descriptor_dim: 64`.
 - Disk after build: 16 GB used, 13 GB free.
 
-Still open in Phase 1: run a stereo example end to end (step 8) and make the AMI
-snapshot (step 9; console only, done by the owner).
+Still open in Phase 1: the AMI snapshot (step 9; console only, done by the owner).
+
+## 9. EuRoC 3-robot runs — MEASURED 2026-10-24
+
+Data: EuRoC MH_01_easy / MH_02_easy / MH_03_medium (ASL format) as robots 0/1/2,
+from the unofficial Hugging Face mirror `GlowBond/EuRoC_MAV_Dataset` (ETH's
+Research Collection blocks scripted downloads). Replay at rate 0.25, every 2nd
+frame (2.5 stereo pairs/s per robot) on the 2-vCPU instance.
+
+Rectification check (`scripts/check_rectification.py`, 60 MH_01 pairs): share of
+left-right ORB matches on the same row with positive disparity is 0.000 raw
+(the right image sits about 13 px higher) and 0.900 after OpenCV 5 rectification.
+
+| Run | Inter-robot LC | Joint ATE, odometry only | Joint ATE, Swarm-SLAM | Per-robot ATE optimized (r0/r1/r2) |
+|---|---|---|---|---|
+| euroc3_r025 | 26 | — (no timestamps logged) | — | — |
+| euroc3_r025_b | 23 | 0.383 m | **1.662 m** (bad) | 0.059 / 0.048 / 0.081 m |
+| euroc3_r025_c | 28 | 0.274 m | **0.090 m** | 0.088 / 0.071 / 0.071 m |
+
+- **Run b bug:** robots were merged rotated by about 120°, which is exactly the
+  rotated camera_link->camera_optical TF. All 13 verifiable inter-robot closures were
+  true matches (0.01–1.6 m apart in ground truth). Fix (run c): stamp images in
+  the base frame (identity transform), as Swarm-SLAM's KITTI launch does.
+- `evaluation.enable_pose_timestamps_recording: true` is required, or no
+  pose can be matched to ground truth (run a).
+- **The "odometry only" joint ATE is flattering:** all MH flights take off
+  from the same spot, so unmerged odometry frames line up by coincidence. The
+  fair comparison is per-robot ATE plus joint ATE after merging.
+- Joint ATE = one SE(3) alignment for all 3 robots against Leica ground truth (the
+  shared frame across MH sequences). Ground truth is converted from body to cam0 with
+  EuRoC's T_BS. The small rectification rotation R1 is ignored (less than 1°).
