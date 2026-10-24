@@ -33,7 +33,8 @@ def rows(sql, *args):
 
 @app.get("/")
 def index():
-    return FileResponse(Path(__file__).with_name("index.html"))
+    # no-store: a browser once kept a cached copy from before the approval images were added.
+    return FileResponse(Path(__file__).with_name("index.html"), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/state")
