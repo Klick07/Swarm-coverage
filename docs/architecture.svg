@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" width="1280" height="800" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title>Swarm coverage architecture</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#52514e"/>
+    </marker>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c26a00"/>
+    </marker>
+    <style>
+      .t { font-size: 14px; font-weight: 600; fill: #0b0b0b; }
+      .s { font-size: 12px; fill: #52514e; }
+      .x { font-size: 11px; fill: #7b7a75; }
+      .g { font-size: 13px; font-weight: 700; fill: #52514e; letter-spacing: .04em; }
+      .box { fill: #ffffff; stroke: #c9c7c0; stroke-width: 1.2; }
+      .cv { fill: #eaf2fc; stroke: #2a78d6; stroke-width: 1.5; }
+      .aws { fill: #fdf0e9; stroke: #eb6834; stroke-width: 1.5; }
+      .hum { fill: #fff4dc; stroke: #c26a00; stroke-width: 1.5; }
+      .edge { stroke: #52514e; stroke-width: 1.6; fill: none; marker-end: url(#a); }
+      .human { stroke: #c26a00; stroke-width: 1.8; fill: none; marker-end: url(#h); stroke-dasharray: 6 4; }
+      .plan { fill: none; stroke: #9a9891; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+  <rect width="1280" height="800" fill="#fcfcfb"/>
+  <text x="24" y="36" font-size="20" font-weight="700" fill="#0b0b0b">Swarm coverage: perception → decision → action</text>
+  <text x="24" y="58" class="s">What runs today. Blue = OpenCV 5 work. Orange = AWS. Dashed grey = planned, not built (no cameras were available).</text>
+
+  <!-- ===== Inputs ===== -->
+  <text x="24" y="100" class="g">INPUT</text>
+  <rect x="24" y="112" width="200" height="120" rx="8" class="box"/>
+  <text x="38" y="138" class="t">EuRoC replay ×3</text>
+  <text x="38" y="158" class="s">MH_01 / MH_02 / MH_03</text>
+  <text x="38" y="176" class="s">raw stereo pairs, quarter speed</text>
+  <text x="38" y="194" class="s">optional failure injection:</text>
+  <text x="38" y="212" class="s">blank wall, shake</text>
+  <rect x="24" y="252" width="200" height="86" rx="8" class="plan"/>
+  <text x="38" y="278" class="t" fill="#7b7a75">Wi-Fi stereo cams</text>
+  <text x="38" y="298" class="x">+ Mac relay → HTTPS ingest</text>
+  <text x="38" y="316" class="x">planned (spec Phase 2–3)</text>
+
+  <!-- ===== EC2 ===== -->
+  <rect x="252" y="84" width="676" height="560" rx="12" fill="none" stroke="#eb6834" stroke-width="1.5"/>
+  <text x="268" y="106" class="g" fill="#eb6834">AWS EC2 · m7i-flex.large (2 vCPU, 8 GB) · Ubuntu 24.04 · ROS 2 Jazzy · Sydney</text>
+
+  <text x="270" y="134" class="x">per robot r0, r1, r2</text>
+  <rect x="270" y="142" width="196" height="134" rx="8" class="cv"/>
+  <text x="284" y="166" class="t">OpenCV 5 front end</text>
+  <text x="284" y="186" class="s">rectify (stereoRectify, remap)</text>
+  <text x="284" y="204" class="s">blur (Laplacian variance)</text>
+  <text x="284" y="222" class="s">ORB features</text>
+  <text x="284" y="240" class="s">stereo same-row check</text>
+  <text x="284" y="258" class="s">tracking: RANSAC F-matrix</text>
+
+  <rect x="490" y="142" width="180" height="78" rx="8" class="box"/>
+  <text x="504" y="166" class="t">RTAB-Map</text>
+  <text x="504" y="186" class="s">stereo odometry</text>
+  <text x="504" y="204" class="s">auto-reset after 3 lost</text>
+
+  <rect x="694" y="142" width="214" height="134" rx="8" class="box"/>
+  <text x="708" y="166" class="t">Swarm-SLAM (cslam)</text>
+  <text x="708" y="186" class="s">keyframes, CosPlace ResNet-18</text>
+  <text x="708" y="204" class="s">place recognition</text>
+  <text x="708" y="222" class="s">inter-robot loop closures</text>
+  <text x="708" y="240" class="s">GTSAM 4.2 pose graph</text>
+  <text x="708" y="258" class="s">→ one merged map</text>
+
+  <path d="M224,172 L268,172" class="edge"/>
+  <path d="M224,295 L246,295 L246,190 L268,190" class="plan" marker-end="url(#a)"/>
+  <path d="M466,181 L488,181" class="edge"/>
+  <path d="M670,181 L692,181" class="edge"/>
+  <path d="M466,252 L692,252" class="edge"/>
+  <text x="530" y="246" class="x">rectified images + camera_info</text>
+
+  <rect x="270" y="320" width="638" height="64" rx="8" class="box"/>
+  <text x="284" y="344" class="t">Event recorder → events.jsonl</text>
+  <text x="284" y="364" class="s">quality scores · keyframe ↔ image stamp · inter-robot closures (+ Swarm-SLAM's success flag) · merged poses</text>
+  <path d="M368,276 L368,318" class="edge"/>
+  <path d="M800,276 L800,318" class="edge"/>
+  <text x="378" y="300" class="x">/rN/quality</text>
+  <text x="810" y="300" class="x">inter-robot closures</text>
+
+  <rect x="270" y="410" width="638" height="76" rx="8" class="box"/>
+  <text x="284" y="434" class="t">Coordinator (coordinator/main.py)</text>
+  <text x="284" y="454" class="s">events: overlap · quality drop · SLAM tracking lost / recovered</text>
+  <text x="284" y="472" class="s">tools: get_quality, get_overlaps, verify_overlap, mark_covered, request_approval, notify, log_decision</text>
+  <path d="M589,384 L589,408" class="edge"/>
+
+  <!-- OpenCV re-verification inside coordinator -->
+  <rect x="694" y="520" width="214" height="104" rx="8" class="cv"/>
+  <text x="708" y="544" class="t">OpenCV 5 re-verify</text>
+  <text x="708" y="564" class="s">ORB + MAGSAC on both</text>
+  <text x="708" y="582" class="s">keyframes; auto only if</text>
+  <text x="708" y="600" class="s">inliers ≥ 50 and spread ≥ 10%</text>
+  <path d="M800,486 L800,518" class="edge"/>
+
+  <rect x="270" y="520" width="400" height="104" rx="8" class="hum"/>
+  <text x="284" y="544" class="t">Guardrails in code</text>
+  <text x="284" y="564" class="s">mark_covered refuses low-confidence overlaps until a</text>
+  <text x="284" y="582" class="s">human approves · timeouts + rule fallback if Bedrock fails</text>
+  <text x="284" y="600" class="s">· every action logged with its OpenCV + Swarm-SLAM values</text>
+  <path d="M470,486 L470,518" class="edge"/>
+
+  <!-- ===== Bedrock ===== -->
+  <rect x="960" y="398" width="296" height="100" rx="8" class="aws"/>
+  <text x="976" y="424" class="t">Amazon Bedrock · Nova 2 Lite</text>
+  <text x="976" y="444" class="s">us-east-1, Converse API with tool calls</text>
+  <text x="976" y="462" class="s">reached via the EC2 IAM role (no keys</text>
+  <text x="976" y="480" class="s">on the server)</text>
+  <path d="M908,436 L958,436" class="edge"/>
+  <path d="M958,462 L908,462" class="edge"/>
+  <text x="914" y="430" class="x">event</text>
+  <text x="914" y="478" class="x">tool calls</text>
+
+  <!-- ===== Outputs ===== -->
+  <text x="960" y="100" class="g">OUTPUT</text>
+  <rect x="960" y="112" width="296" height="96" rx="8" class="box"/>
+  <text x="976" y="138" class="t">coverage.db (SQLite)</text>
+  <text x="976" y="158" class="s">coverage per 2 m cell · overlaps · walker</text>
+  <text x="976" y="176" class="s">notifications · decision log</text>
+  <text x="976" y="194" class="x">(DynamoDB is blocked on this AWS account)</text>
+  <path d="M908,420 L934,420 L934,160 L958,160" class="edge"/>
+
+  <rect x="960" y="232" width="296" height="98" rx="8" class="box"/>
+  <text x="976" y="258" class="t">Dashboard (FastAPI)</text>
+  <text x="976" y="278" class="s">live camera views · merged map · approval</text>
+  <text x="976" y="296" class="s">cards with match images · decision log</text>
+  <text x="976" y="314" class="x">localhost only on EC2</text>
+  <path d="M1108,208 L1108,230" class="edge"/>
+
+  <rect x="960" y="560" width="296" height="64" rx="8" class="box"/>
+  <text x="976" y="586" class="t">Cloudflare quick tunnel</text>
+  <text x="976" y="606" class="s">public HTTPS · approvals need a token</text>
+  <path d="M1240,330 L1240,558" class="edge"/>
+
+  <rect x="960" y="660" width="140" height="80" rx="8" class="box"/>
+  <text x="974" y="686" class="t">Walkers</text>
+  <text x="974" y="706" class="s">"Area covered…</text>
+  <text x="974" y="722" class="s">move on" etc.</text>
+  <rect x="1116" y="660" width="140" height="80" rx="8" class="hum"/>
+  <text x="1130" y="686" class="t">Human</text>
+  <text x="1130" y="706" class="s">Approve / Reject</text>
+  <text x="1130" y="722" class="s">weak overlaps</text>
+  <path d="M1030,624 L1030,658" class="edge"/>
+  <path d="M1186,624 L1186,658" class="edge"/>
+
+  <!-- human answer loops back -->
+  <path d="M1186,740 L1186,764 L470,764 L470,626" class="human"/>
+  <text x="490" y="758" class="x" fill="#c26a00">the human answer (via the dashboard) unblocks the coverage change</text>
+
+  <text x="24" y="790" class="x">Swarm-SLAM: Lajoie et al., MIT license (github.com/MISTLab/Swarm-SLAM). This project adds the OpenCV 5 front end, the recorder, the coordinator, the evaluation and the dashboard.</text>
+</svg>
