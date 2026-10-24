@@ -151,8 +151,18 @@ function render(s) {
   }).join("");
 }
 
-async function answer(id, ok) {
-  const r = await fetch(`/api/approve/${id}?approve=${ok}`, {method: "POST"});
+function token(reset) {
+  let t = null;
+  try { t = reset ? null : localStorage.getItem("approvalToken"); } catch (e) {}
+  if (!t) {
+    t = prompt("Approval token (viewing is public; answering needs the operator's token):") || "";
+    try { localStorage.setItem("approvalToken", t); } catch (e) {}
+  }
+  return t;
+}
+async function answer(id, ok, retry = true) {
+  const r = await fetch(`/api/approve/${id}?approve=${ok}`, {method: "POST", headers: {"X-Approval-Token": token(false)}});
+  if (r.status === 403 && retry) { token(true); return answer(id, ok, false); }
   if (!r.ok) alert(await r.text());
   refresh();
 }

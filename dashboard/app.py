@@ -5,16 +5,18 @@
 Approve/Reject only writes the human's answer; the coordinator applies it, so the
 coverage record stays unchanged until a person has answered.
 """
+import hmac
 import json
 import os
 import sqlite3
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 
 RUN_DIR = os.environ.get("RUN_DIR", "runs/euroc3_r025_d")
+APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
 app = FastAPI(title="Swarm-SLAM coordinator")
 
 
@@ -56,7 +58,10 @@ def state():
 
 
 @app.post("/api/approve/{overlap_id}")
-def approve(overlap_id: int, approve: bool):
+def approve(overlap_id: int, approve: bool, x_approval_token: str = Header(default="")):
+    # The dashboard is public through the tunnel: viewing is open, answering needs the token.
+    if APPROVAL_TOKEN and not hmac.compare_digest(x_approval_token, APPROVAL_TOKEN):
+        raise HTTPException(403, "approval token required")
     with db() as con:
         cur = con.execute("UPDATE overlaps SET state=?, resolved_by='human' WHERE overlap_id=? AND state='pending'",
                           ("approved" if approve else "rejected", overlap_id))
