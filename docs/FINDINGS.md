@@ -292,3 +292,52 @@ calls, about 201k input / 6.7k output tokens, 0 fallbacks.
 the model nor the rules can change coverage without approval (test:
 `tests/test_coordinator.py`). Verified on the dashboard: Approve #5 -> coverage updated,
 camera 2 notified, logged as source=human; Reject #10 -> coverage unchanged, logged.
+
+## 11. Phase 6 failure cases and evaluation — MEASURED 2026-10-24
+
+No house walks exist (no cameras), so the spec's failure cases were created from EuRoC
+(`frontend/euroc_replay.py --perturb`; each perturbed frame is tagged in stamps_rN.csv):
+blank wall = textureless frames on camera 1 for 40–47% of MH_02 (10.6 s data); quick shake =
+random 15–35 px motion blur plus jitter on camera 2 for 60–66% of MH_03 (8.0 s data).
+Front-end check (`scripts/check_perturb.py`, MH_02): clean blur 275 / 1000 features /
+track 0.94; blank blur 20 / 0 features; shake blur 10 / track 0.20.
+
+| | Run e (Odom/ResetCountdown=0, default) | Run f (ResetCountdown=3) |
+|---|---|---|
+| First "slow down", blank / shake | +0.3 s / +0.2 s data | +0.3 s / +0.2 s data |
+| SLAM back after window ended, blank | 147 s wall (never during the walk) | 1.6 s wall |
+| Odometry-lost frames, blank / shake | 202 / 179 | 63 / 15 |
+| Keyframes cams 1/2 (clean run d: 440/405) | 324 / 337 | 442 / 403 |
+| Inter-robot closures | 20 | 34 |
+| Joint ATE merged | 0.069 m (post-failure parts missing) | 0.336 m |
+| Per-robot ATE cams 1/2, odometry only / merged | 0.041, 0.133 / 0.030, 0.097 | 2.022, 6.453 / 0.409, 0.418 |
+| Coverage precision / recall | — | 1.00 (23/23) / 0.375 (6/16) |
+
+- Without auto-reset, RTAB-Map odometry never recovered after either failure, and the
+  coordinator kept saying "Tracking OK" because the images were fine again. Two fixes:
+  (1) `Odom/ResetCountdown=3` (now the launch default); (2) the coordinator alerts when 30 good
+  frames arrive without a Swarm-SLAM keyframe (clean max 21; 0 false alarms on runs d/e/f
+  healthy robots) and gives the all-clear when keyframes resume.
+- Reset trade-off: odometry resumes from the last pose, so motion during the outage is
+  lost (2.0 / 6.5 m odometry error); Swarm-SLAM loop closures cut it to about 0.41 m. That
+  gives a complete map with worse accuracy, instead of an accurate map that silently stops.
+- Similar-looking places (`eval/similar_places.py`, run d): 1,500 cross-camera pairs more
+  than 5 m apart in ground truth; 7 had >= 50 OpenCV inliers. The worst were the same
+  object seen from 5–6 m away (matches crowded in one patch), not look-alike rooms. Added a
+  spread rule (inliers cover >= 10% of each image). With 6 injected false closures
+  (success=true): 4 held for a human, 2 auto-covered (75 inl/14%, 51 inl/20%).
+  Real overlaps: 19 auto, 5 to a human. Precision with injection 0.83, without 1.00.
+
+**Coverage precision/recall** (`eval/coverage_pr.py`; correct = the two keyframes <= 3 m
+apart in ground truth; recall over 2 m ground-truth cells visited by >= 2 cameras):
+run d 1.00 (10/10) / 0.22 (4/18); run f 1.00 (23/23) / 0.375 (6/16). Recall is low
+because coverage is only claimed at inter-robot closures (cslam budget: 1 per 5 s).
+Map-based coverage from merged trajectories would raise it (not built).
+
+**Latency** (`eval/latency.py`, run d, quarter-speed replay on 2 vCPU):
+front end 0.19 s median per frame (p90 0.33); Swarm-SLAM frame -> inter-robot closure
+27 s median wall (p90 227 s, about 7 s data time; detection runs every 5 s with a budget of 1);
+Bedrock overlap decision 2.2 s median (p90 2.5); dashboard polls every 1 s. Frame -> "area
+covered" on the dashboard is about 30 s median, dominated by loop-closure detection.
+
+**Trajectory, merged vs single:** see item 9 (run c 0.090 m joint; run d 0.079 m joint).
