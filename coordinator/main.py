@@ -33,6 +33,10 @@ MIN_INLIERS = 50
 # into one patch (same object seen from far away). Requiring inliers to span >= 10% of each image
 # keeps 19/20 true overlaps with >= 50 inliers and stops 4/6 of those look-alikes.
 MIN_SPREAD = 0.10
+# SLAM tracking lost while the images look fine (failure run euroc3_fail_e: after the blank
+# wall the frames were sharp again but RTAB-Map odometry never recovered). Clean runs have
+# at most 21 good frames between Swarm-SLAM keyframes; the failure run had 372-491.
+LOST_FRAMES = 30
 
 
 class Coordinator:
@@ -42,6 +46,9 @@ class Coordinator:
         self.kf_stamp, self.kf_pos, self.placed = {}, {}, set()
         self.window = {r: deque(maxlen=WINDOW) for r in range(3)}
         self.last_alert = {}
+        self.since_kf = {r: 0 for r in range(3)}   # good frames since this robot's last keyframe
+        self.last_kf = {}
+        self.lost = set()
         self.seen_lc = set()
         self.ctx = {}
         self.agent = None
@@ -156,6 +163,7 @@ class Coordinator:
             self._on_quality(ev)
         elif kind == "keyframe":
             self.kf_stamp[(ev["robot"], ev["kf"])] = ev["stamp_ns"]
+            self._on_keyframe(ev["robot"], ev["kf"])
         elif kind == "poses":
             self._on_poses(ev)
         elif kind == "lc":
@@ -175,17 +183,45 @@ class Coordinator:
                 self.placed.add((r, kf))
                 self.store.see_place(self._place(r, kf), r, q)
 
+    def _on_keyframe(self, r, kf):
+        self.since_kf[r] = 0
+        self.last_kf[r] = kf
+        if r in self.lost:
+            self.lost.discard(r)
+            self.ctx = {"trigger": "tracking_recovered", "values": {"robot": r, "keyframe": kf}, "overlap_id": None}
+            self._decide(r, f"Tracking-recovered event: camera {r} is producing Swarm-SLAM keyframes again "
+                            f"(keyframe {kf}).",
+                         lambda: self.notify(r, f"Camera {r}, tracking recovered, carry on."))
+
+    def _check_lost(self, r, q):
+        if r in self.lost or r not in self.last_kf or self.since_kf[r] < LOST_FRAMES:
+            return
+        self.lost.add(r)
+        place = self._place(r, self.last_kf[r])
+        self.ctx = {"trigger": "slam_tracking_lost", "values": {
+            "opencv": q, "frames_without_keyframe": self.since_kf[r], "last_keyframe": self.last_kf[r],
+            "last_place": place}, "overlap_id": None}
+        self._decide(r, f"Tracking-lost event: camera {r} has sent {self.since_kf[r]} good frames (threshold "
+                        f"{LOST_FRAMES}) but Swarm-SLAM made no new keyframe, so its odometry is lost even though "
+                        f"OpenCV image quality is blur {q['blur']}, features {q['features']}. Its last mapped "
+                        f"place was {place}.",
+                     lambda: self.notify(r, f"Camera {r}, tracking lost: walk back to your last mapped area "
+                                            f"({place}) and hold still."))
+
     def _on_quality(self, ev):
         r = ev["robot"]
         self.window[r].append(ev)
         q = self.get_quality(r)
         if ev.get("passed", True):  # only passed frames are saved as JPEGs by the front end
             self.store.set_camera(r, ev["stamp_ns"], q)
+            self.since_kf[r] += 1
+            self._check_lost(r, q)
         t = ev["stamp_ns"] / 1e9
         if len(self.window[r]) < WINDOW or not q["weak"] or t - self.last_alert.get(r, -1e9) < QUALITY_COOLDOWN_S:
             return
         self.last_alert[r] = t
-        self.ctx = {"trigger": "quality_drop", "values": {"opencv": q}, "overlap_id": None}
+        self.ctx = {"trigger": "quality_drop", "values": {"opencv": q, "frame_stamp_ns": ev["stamp_ns"]},
+                    "overlap_id": None}
         self._decide(r, f"Quality event: camera {r} OpenCV 5 window medians over {WINDOW} frames: "
                         f"blur {q['blur']} (threshold {WEAK_BLUR}), track_inliers {q['track_inliers']} "
                         f"(threshold {WEAK_TRACK}), features {q['features']}.",

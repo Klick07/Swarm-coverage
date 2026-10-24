@@ -9,8 +9,9 @@ import boto3
 from botocore.config import Config
 
 SYSTEM = """You coordinate three people carrying stereo cameras through a building to map it.
-You receive one event at a time: either an inter-robot overlap that Swarm-SLAM detected, or a
-tracking-quality drop measured by the OpenCV 5 front end. Use the tools to act, then stop.
+You receive one event at a time: an inter-robot overlap that Swarm-SLAM detected, a
+tracking-quality drop measured by the OpenCV 5 front end, or Swarm-SLAM tracking being lost or
+recovered for a camera. Use the tools to act, then stop.
 
 Rules:
 - Overlap event: call verify_overlap first. If confidence is "high", call mark_covered and
@@ -19,6 +20,10 @@ Rules:
   If confidence is "low", call request_approval with a short reason; do NOT mark it covered.
 - Quality event: notify that camera with exactly "Camera N, slow down, tracking is weak."
   using its number, unless get_quality shows it has already recovered.
+- Tracking-lost event: notify that camera with exactly
+  "Camera N, tracking lost: walk back to your last mapped area (PLACE) and hold still."
+  using its number and the place given in the event. Do this even if image quality looks fine.
+- Tracking-recovered event: notify that camera with exactly "Camera N, tracking recovered, carry on."
 - Always finish with one log_decision call that states the decision and the deciding values.
 Be brief. Do not invent values or thresholds; only cite numbers returned by tools or given in
 the event. The only overlap thresholds are min_inliers and min_spread (see confidence_rule)."""

@@ -48,9 +48,12 @@ def setup(context):
                              ("left/camera_info", f"{cam}/left/camera_info"),
                              ("right/camera_info", f"{cam}/right/camera_info"),
                              ("odom", f"{ns}/odom")],
-                 # Same odometry flags as cslam_experiments' KITTI stereo launch.
+                 # Same odometry flags as cslam_experiments' KITTI stereo launch, plus auto-reset:
+                 # with the default ResetCountdown=0, odometry never recovered after a blank wall or
+                 # a shake (run euroc3_fail_e). After 3 failed frames it now resumes from the last pose.
                  arguments=["--Vis/MinInliers", "8", "--Odom/KeyFrameThr", "0.0",
                             "--Odom/VisKeyFrameThr", "0.0", "--Odom/ScanKeyFrameThr", "0.0",
+                            "--Odom/ResetCountdown", context.launch_configurations["odom_reset"],
                             "--ros-args", "--log-level", "warn"]),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(
@@ -72,5 +75,6 @@ def generate_launch_description():
         DeclareLaunchArgument("skip", default_value="2"),
         DeclareLaunchArgument("robots", default_value="3"),
         DeclareLaunchArgument("perturb", default_value="", description="failure injection, see euroc_replay.py"),
+        DeclareLaunchArgument("odom_reset", default_value="3", description="RTAB-Map Odom/ResetCountdown"),
         OpaqueFunction(function=setup),
     ])

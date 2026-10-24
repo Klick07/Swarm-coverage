@@ -3,7 +3,7 @@ import json
 import cv2
 import numpy as np
 
-from coordinator.main import MIN_INLIERS, WEAK_BLUR, WINDOW, Coordinator
+from coordinator.main import LOST_FRAMES, MIN_INLIERS, WEAK_BLUR, WINDOW, Coordinator
 
 
 def make_run(tmp_path, same_view):
@@ -54,6 +54,17 @@ def test_swarm_slam_rejected_closure_is_logged_not_acted_on(tmp_path):
     c.on_event({"type": "lc", "a": 0, "ka": 5, "b": 1, "kb": 7, "success": False, "translation": [0, 0, 0]})
     assert not c.store.rows("SELECT * FROM overlaps")
     assert c.store.rows("SELECT action FROM decisions")[0]["action"] == "none"
+
+
+def test_slam_lost_with_good_images_notifies_then_recovers(tmp_path):
+    c = make_run(tmp_path, same_view=True)
+    good = {"type": "quality", "robot": 0, "blur": 250.0, "features": 1000, "stereo_inliers": 0.9,
+            "track_inliers": 0.8, "passed": True, "ms": 1}
+    for i in range(LOST_FRAMES + 5):  # sharp frames keep coming, but no new keyframe
+        c.on_event({**good, "stamp_ns": 200 + i})
+    c.on_event({"type": "keyframe", "robot": 0, "kf": 6, "stamp_ns": 999, "odom": [0, 0, 0]})
+    msgs = [n["message"] for n in c.store.rows("SELECT * FROM notifications WHERE camera=0 ORDER BY id")]
+    assert len(msgs) == 2 and msgs[0].startswith("Camera 0, tracking lost") and "recovered" in msgs[1]
 
 
 def test_quality_drop_notifies_once_per_cooldown(tmp_path):
