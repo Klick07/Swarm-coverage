@@ -9,9 +9,10 @@ Built for the OpenCV 5 hackathon, Agentic Vision Award track.
 
 ![Architecture](docs/figures/architecture.png)
 
-**What runs today.** No cameras were available, so the three "walkers" are the EuRoC MAV
-Machine Hall flights MH_01, MH_02 and MH_03. These are real stereo footage of one hall,
-with laser-tracker ground truth, replayed through the full pipeline on AWS EC2. The camera
+**What runs today.** No cameras were available, so the three "walkers" are EuRoC MAV flights:
+real stereo footage with motion-capture or laser-tracker ground truth, replayed through the full
+pipeline on AWS EC2. Two environments: an indoor room (**Vicon Room 1**, V1_01–03, the demo) and an
+industrial hall (**Machine Hall**, MH_01–03). The camera
 capture and calibration path (spec Phases 2–3 on real hardware) is designed but not built.
 See [Limitations](#limitations).
 
@@ -19,15 +20,17 @@ See [Limitations](#limitations).
 
 | | Result |
 |---|---|
-| Merged map, 3 robots, one alignment vs ground truth | **7.9–9.0 cm** joint ATE (runs c, d). Robot 2: 23.7 cm alone, 7.1 cm merged. |
+| Merged map, 3 robots, one alignment vs ground truth | Vicon Room: **0.895 m unmerged → 0.207 m merged**. Machine Hall: **7.9–9.0 cm** (robot 2: 23.7 → 7.1 cm). |
 | OpenCV 5 rectification on real EuRoC pairs | same-row matches **0% raw, 90% rectified** (raw right image sits ~13 px higher) |
-| "Area covered" precision / recall vs ground truth | **1.00** (10/10 and 23/23) / 0.22–0.375 |
+| "Area covered" precision / recall vs ground truth | **1.00** in every run / 0.667 (room), 0.22–0.375 (hall) |
 | Weak-tracking warning after a blank wall / quick shake | **+0.3 s / +0.2 s** |
 | SLAM recovery after a blank wall | 147 s → **1.6 s** with odometry auto-reset (accuracy trade-off: 0.34 m) |
 | Look-alike false closures (6 injected) | **4 held for a human**, 2 auto-covered |
-| Coordinator vs rule reference (24 overlaps) | identical walker notifications; 0 Bedrock fallbacks |
+| Coordinator (Bedrock), final replays | room: 11 auto-covered, 1 to a human; hall: 19 / 5. 0 wrong recipients, 0 fallbacks |
+| Weak-tracking rule across environments | blur threshold gave 52 nuisance warnings in the room → tracking-based rule: 15, both failures still caught |
 | Frame → "area covered" on the dashboard | ~30 s median, almost all of it Swarm-SLAM loop-closure detection |
 
+![Merged map, Vicon Room 1](docs/figures/merge_vicon_room1.png)
 ![Merged map before and after the frame fix](docs/figures/merge_before_after.png)
 
 ## How it works
@@ -43,8 +46,9 @@ See [Limitations](#limitations).
 4. **Coordinator (`coordinator/`).** Amazon Nova 2 Lite on Bedrock, using tool calls. For each
    overlap it re-verifies the two keyframes with OpenCV 5 (ORB + MAGSAC). With ≥ 50 inliers
    that span ≥ 10% of each image, it marks the area covered and tells the second camera to move
-   on. Otherwise it requests human approval. It also warns on weak tracking, and on SLAM
-   tracking loss while the images still look fine. Guardrails live in code: `mark_covered`
+   on. Otherwise it requests human approval. It also warns on weak tracking (tracking inliers
+   < 0.5 or fewer than 100 features; blur is shown but doesn't trigger, because it depends on the
+   scene), and on SLAM tracking loss while the images still look fine. Guardrails live in code: `mark_covered`
    refuses a low-confidence overlap until a human has approved it. Every action is logged
    with the values that triggered it.
 5. **Dashboard (`dashboard/`).** Live camera views, the merged map with coverage cells,
@@ -84,14 +88,13 @@ ssh ubuntu@<ec2> 'bash ~/ec2_setup.sh ~/swarm.repos'          # ~15 min
 # 2. OpenCV 5 venv next to ROS (rclpy + cv2 5.0.0 in one interpreter)
 ssh ubuntu@<ec2> 'cd ~/OpenCVH && bash scripts/setup_cv5env.sh'
 
-# 3. EuRoC MH_01-03 (4 GB) and calibration in our format
-ssh ubuntu@<ec2> 'pip install --user --break-system-packages remotezip==0.12.3 && python3 ~/OpenCVH/scripts/fetch_euroc.py'
-ssh ubuntu@<ec2> 'cd ~/OpenCVH && source /opt/ros/jazzy/setup.bash && for i in 0 1 2; do
-  s=$(ls ~/data/euroc | sed -n "$((i+1))p"); ~/cv5env/bin/python -m frontend.euroc_to_calib ~/data/euroc/$s/mav0 calib/euroc_cam$i.yaml; done'
+# 3. EuRoC footage (Vicon Room 1: 5 GB unpacked; Machine Hall MH_01-03: 6.6 GB)
+ssh ubuntu@<ec2> 'pip install --user --break-system-packages remotezip==0.12.3 &&
+  python3 ~/OpenCVH/scripts/fetch_euroc.py vicon_room1 V1_01_easy V1_02_medium V1_03_difficult'
 
-# 4. Run 3 robots (~15 min at quarter speed). Optional failure injection as the 5th argument:
-ssh ubuntu@<ec2> 'cd ~/OpenCVH && bash scripts/run_euroc.sh myrun 0.25 2 900'
-#    e.g. "r1:blank:0.40:0.47,r2:shake:0.60:0.66"
+# 4. Run 3 robots (~15 min at quarter speed); calibration is generated per sequence.
+#    Optional failure injection as the 5th argument, e.g. "r1:blank:0.40:0.47,r2:shake:0.60:0.66"
+ssh ubuntu@<ec2> 'cd ~/OpenCVH && SEQS=V1_01_easy,V1_02_medium,V1_03_difficult bash scripts/run_euroc.sh myrun 0.25 2 900'
 
 # 5. Evaluate (copy ~/runs/myrun and the EuRoC ground-truth CSVs to gt/)
 python -m eval.cslam_eval runs/myrun gt          # ATE per robot and joint
@@ -119,16 +122,16 @@ Python packages for the cslam nodes are pinned in `scripts/ec2_setup.sh`.
 
 ## Limitations
 
-- **No real cameras or house.** All results come from EuRoC footage (a drone in an industrial
-  hall, grayscale, from an unofficial Hugging Face mirror). The live Wi-Fi capture, the Mac relay
+- **No real cameras or house.** All results come from EuRoC footage (a drone in a room and in an
+  industrial hall, grayscale, from an unofficial Hugging Face mirror). The live Wi-Fi capture, the Mac relay
   and checkerboard calibration (spec Phase 2) are not built.
 - **AWS free plan.** DynamoDB, the load balancer and Lambda are blocked on this account, and
   Anthropic models are refused on Bedrock. So: SQLite instead of DynamoDB, a Cloudflare tunnel
   instead of an ALB, Amazon Nova instead of Claude. The COOL / Graviton benchmark was not run.
 - **2 vCPU.** Three robots only keep up at quarter speed. Latency in wall-clock time is about 4×
   the data time.
-- **Recall is low (0.22–0.375).** Coverage is only claimed at inter-robot loop closures, which
-  Swarm-SLAM reports at most once per 5 s. The dashboard shows where paths cross, but doesn't claim them.
+- **Recall is low in the hall (0.22–0.375; 0.667 in the room).** Coverage is only claimed at inter-robot
+  loop closures, which Swarm-SLAM reports at most once per 5 s. The dashboard shows where paths cross, but doesn't claim them.
 - **2 of 6 planted look-alike closures still auto-cover.** Odometry auto-reset keeps the map
   complete after a failure, but loses the motion during the outage (0.34 m joint ATE vs 0.08 m).
 - The quick-tunnel URL changes when the tunnel restarts.

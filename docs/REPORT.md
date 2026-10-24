@@ -51,10 +51,10 @@ OpenCV 4.6 sits on the same machine for ROS.
 | Function | OpenCV 5 calls | Used for |
 |---|---|---|
 | Rectification | `stereoRectify` (`CALIB_ZERO_DISPARITY`), `initUndistortRectifyMap`, `remap`; `fisheye.*` variants | Swarm-SLAM input (it hard-codes `alreadyRectified = true`) |
-| Blur | `Laplacian(...).var()` | weak-tracking warnings |
+| Blur | `Laplacian(...).var()` | shown on the dashboard; not a trigger (scene-dependent, Section 6.4) |
 | Features | `ORB_create(1000)`, `BFMatcher(NORM_HAMMING)` | quality score, stereo check |
 | Stereo check | same-row + positive-disparity share of left↔right matches | rectification evidence, quality |
-| Tracking check | `findFundamentalMat(FM_RANSAC)` vs previous frame | weak-tracking warnings |
+| Tracking check | `findFundamentalMat(FM_RANSAC)` vs previous frame | weak-tracking warnings (< 0.5), with feature count (< 100) |
 | Overlap re-verification | ORB(1500) + ratio test, `findFundamentalMat(USAC_MAGSAC)`, `convexHull`/`contourArea` | deciding auto-cover vs human approval |
 | Evidence images | `drawMatches` | approval cards |
 | Calibration import | EuRoC `sensor.yaml` → K, D, R, T (`frontend/euroc_to_calib.py`) | rectification maps |
@@ -89,9 +89,11 @@ about 127 Nova calls (226k input / 7.2k output tokens).
 
 ## 6. Evaluation
 
-**Data.** EuRoC MAV Machine Hall MH_01_easy / MH_02_easy / MH_03_medium act as cameras 0 / 1 / 2.
-These are real stereo footage (752×480, 20 Hz) of one hall with Leica laser-tracker ground truth in
-a shared frame. They come from the Hugging Face mirror `GlowBond/EuRoC_MAV_Dataset`, because ETH's
+**Data.** EuRoC MAV flights act as cameras 0 / 1 / 2, in two environments: **Vicon Room 1**
+(V1_01_easy / V1_02_medium / V1_03_difficult, an indoor room with mats and clutter, Vicon ground truth;
+used for the demo) and the **Machine Hall** (MH_01_easy / MH_02_easy / MH_03_medium, an industrial hall,
+Leica laser-tracker ground truth). These are real stereo footage (752×480, 20 Hz) from one rig, with
+ground truth in a shared frame per environment. They come from the Hugging Face mirror `GlowBond/EuRoC_MAV_Dataset`, because ETH's
 server blocks scripted downloads. The replay runs at 0.25× real time and publishes every 2nd frame,
 so each camera sends 2.5 pairs/s; that is what 3 robots on 2 vCPU can sustain.
 
@@ -105,9 +107,15 @@ merged consistently.
 | c: odometry only | — | 0.103 m | 0.086 m | 0.237 m | 0.274 m* |
 | c: Swarm-SLAM merged | 28 | 0.088 m | 0.071 m | **0.071 m** | **0.090 m** |
 | d: Swarm-SLAM merged | 24 | 0.062 m | 0.055 m | 0.101 m | **0.079 m** |
+| **Vicon Room 1**: odometry only | — | 0.286 m | 0.317 m | 0.458 m | 0.895 m |
+| **Vicon Room 1**: Swarm-SLAM merged | 12 | 0.243 m | **0.059 m** | **0.159 m** | **0.207 m** |
 
 \*All MH flights take off from the same pad, so the unmerged odometry frames line up by
-coincidence. Per-robot ATE is the fair single-camera baseline.
+coincidence. Per-robot ATE is the fair single-camera baseline there. The Vicon Room flights don't share
+a start pose, so their 0.895 → 0.207 m is a direct measure of what merging adds. The room error is
+higher than the hall's because these flights are faster and more aggressive.
+
+![Merged map, Vicon Room 1](figures/merge_vicon_room1.png)
 
 **Bug found on the way (run b).** The per-robot ATE improved, but whole robots were merged rotated
 by ~120°. That is exactly the camera_link→camera_optical rotation we had published. All 13
@@ -127,9 +135,10 @@ other in ground truth. Recall is measured over 2 m ground-truth floor cells visi
 | d | **1.00** (10/10 claims with ground truth) | 0.22 (4/18) |
 | d + 6 injected false closures | 0.83 (2 wrong) | 0.22 |
 | f (failures + auto-reset) | **1.00** (23/23) | 0.375 (6/16) |
+| Vicon Room 1 | **1.00** (7/7) | **0.667** (6/9) |
 
-Recall is low by design. Coverage is only claimed at inter-robot closures, and Swarm-SLAM reports
-at most one per 5 s (`inter_robot_loop_closure_budget: 1`). The dashboard shows cells where two
+Recall is low in the hall by design (much higher in the small room, where views overlap constantly).
+Coverage is only claimed at inter-robot closures, and Swarm-SLAM reports at most one per 5 s (`inter_robot_loop_closure_budget: 1`). The dashboard shows cells where two
 merged paths cross as "not verified", but doesn't claim them.
 
 ### 6.3 Latency (frame → walker notification)
@@ -138,8 +147,8 @@ merged paths cross as "not verified", but doesn't claim them.
 |---|---|---|
 | OpenCV 5 front end, per frame | 0.19 s | 0.33 s |
 | Swarm-SLAM: frame → inter-robot closure | 27 s wall (~7 s data) | 227 s |
-| Bedrock decision: overlap | 2.28 s | 2.62 s |
-| Bedrock decision: quality drop | 0.99 s | 2.05 s |
+| Bedrock decision: overlap (hall / room) | 2.18 s / 2.19 s | 2.40 s / 2.49 s |
+| Bedrock decision: quality drop (hall / room) | 0.97 s / 1.03 s | 1.28 s / 1.36 s |
 | Dashboard refresh | ≤ 1 s | |
 
 Frame → "area covered" on the dashboard is about **30 s**, almost all of it loop-closure detection
@@ -172,29 +181,43 @@ blur 20 / 0 features; **quick shake** blur 10 / tracking 0.20.
   away**, with all matches crowded into one patch, rather than look-alike rooms. A spread rule (inliers
   must span ≥ 10% of each image) keeps 19/20 true overlaps with ≥ 50 inliers. We then injected the 6
   hardest pairs as closures that Swarm-SLAM wrongly accepted: **4 were held for a human, 2 auto-covered**.
+- **A threshold that didn't transfer (Vicon Room).** The blur limit of 90, tuned in the bright hall,
+  marked 31% / 71% / 83% of *normal* room frames as blurry (median blur 128 / 59 / 48), so walkers got 52
+  "slow down" messages while tracking was healthy (median tracking inliers 0.65–0.69, 2 lost odometry
+  frames in total). Comparing rules on all runs (`eval/quality_rules.py`): tracking < 0.5 or < 100
+  features gave 14 warnings in the room (from 52) and 7 in the hall (from 15), and still caught both
+  injected failures at the same times. Blur relative to the camera's own median gave 19 / 10. We adopted
+  the tracking rule; blur stays on the dashboard as information.
 
 ## 7. Agentic Vision evidence
 
 **Workflow.** OpenCV 5 + Swarm-SLAM perceive; the coordinator (Nova with tools, guardrails in code)
 decides; walker notifications, coverage records and approval requests are the actions (Section 3).
 
-**Trace: OpenCV output changing a later decision** (final replay of run d, from `coverage.db`):
+**Trace: OpenCV output changing a later decision** (final replays, from `coverage_bedrock_final.db`; rows 1–3 Machine Hall run d, rows 4–5 Vicon Room 1):
 
 | Event | OpenCV 5 values | Decision (Bedrock) | Action |
 |---|---|---|---|
 | Overlap #1, camera 1 kf 4 ↔ camera 0 kf 1 | 225 inliers, spread 0.221 → high | "high confidence (inliers 225 ≥ 50, spread 0.221 ≥ 0.1)" | `mark_covered`; camera 0: "Area covered by camera 1, camera 0 move on." (2.6 s) |
 | Overlap #5, camera 0 kf 11 ↔ camera 2 kf 0 | 26 inliers, spread 0.114 → low | "low confidence: inliers 26 < 50" | `request_approval`; coverage on hold |
-| Quality, camera 0 | blur 100.4, tracking inliers 0.46 < 0.50 | "track_inliers 0.46 < 0.5" | camera 0: "Camera 0, slow down, tracking is weak." (2.1 s) |
+| Quality, camera 0 | tracking inliers 0.46 < 0.50 (blur 100.4, 1000 features) | "track_inliers 0.46 (weak below 0.5)" | camera 0: "Camera 0, slow down, tracking is weak." |
+| **Vicon Room:** overlap #1, camera 0 kf 5 ↔ camera 2 kf 0 | 138 inliers, spread 0.133 → high | "inliers 138 ≥ 50, spread 0.133 ≥ 0.1" | camera 2: "Area covered by camera 0, camera 2 move on." |
+| **Vicon Room:** overlap #4, camera 1 kf 25 ↔ camera 2 kf 15 | 248 inliers but spread 0.085: matches packed on a checkerboard | "low confidence: spread 0.085 < 0.1" | `request_approval`. A repetitive pattern can fool a matcher, so a person checks. |
 
 The same Swarm-SLAM event leads to opposite actions depending on the OpenCV 5 numbers. On the public
 dashboard the operator answered 5 such approval requests live, each between 8 and 98 s after it
 appeared. Each approval was logged with `source=human`, followed by `mark_covered` and the
 notification to the walker.
 
-**Task success** (final replay of run d): 24 overlaps → 19 auto-covered, 5 held for a human; 15 weak-
-tracking warnings (camera 2, the hardest flight, got 7 of them); 153 closures Swarm-SLAM rejected were
-logged and not acted on. Walker notifications were identical to the rule-based reference, with 0 wrong
-recipients and 0 fallbacks.
+**Task success** (final Bedrock replays, final rules):
+
+| | Vicon Room 1 | Machine Hall (run d) |
+|---|---|---|
+| Overlaps auto-covered / held for a human | 11 / 1 | 19 / 5 |
+| Closures Swarm-SLAM rejected (logged, not acted on) | 167 | 153 |
+| "Slow down" warnings | 15 | 7 |
+| Wrong recipients / Bedrock fallbacks | 0 / 0 | 0 / 0 |
+| Nova calls (input / output tokens) | 85 (149k / 4.7k) | 106 (191k / 5.9k) |
 
 **Failure handling.** Agent errors we found and fixed, each measured before and after:
 
@@ -205,6 +228,8 @@ recipients and 0 fallbacks.
 3. **A hung Bedrock call** froze a replay for 17 min. Fix: 10 s / 30 s timeouts, 3 retries, and a
    per-event fallback to the same rules in code, logged as `source=rules`.
 4. **SLAM lost while images look fine** (Section 6.4). Fix: the keyframe-gap alert.
+5. **A perception threshold that didn't transfer** to a darker room (52 nuisance warnings). Fix: warn
+   on tracking quality, not blur (Section 6.4). After: 14 (room), 7 (hall).
 
 **Observability.** Every action row records time, camera, trigger, the OpenCV and Swarm-SLAM values,
 the decision, the action, the model's reason, who decided (`bedrock` / `rules` / `human`) and the
@@ -220,10 +245,13 @@ hard to miss. Answers need an operator token, because the page is public.
 
 - **No live cameras or house walks.** Spec Phases 2–3 on hardware (Wi-Fi capture, Mac relay, checkerboard
   calibration, HTTPS ingest) are designed but not built. All results are on EuRoC: a drone in an
-  industrial hall, grayscale, not people walking a home. The failure cases are synthetic edits of real
+  drone footage in a room and a hall, grayscale, not people walking a home. The failure cases are synthetic edits of real
   frames.
 - **Compute.** 2 vCPU limit the replay to 0.25× speed, and latency figures are in that setting.
-- **Recall** (0.22–0.375) is limited by event-driven claims; map-based coverage would raise it.
+- **Recall** (0.22–0.375 in the hall, 0.667 in the room) is limited by event-driven claims; map-based
+  coverage would raise it.
+- **Thresholds** were tuned on these two environments; the blur lesson shows they need checking in a
+  real house.
 - **Residual risk.** 2 of 6 planted look-alike closures auto-cover. The thresholds were tuned on the same
   few runs they were evaluated on.
 - **Ground truth.** The first seconds of each flight have none, so some claims can't be scored (10 of 19
