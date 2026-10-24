@@ -16,7 +16,13 @@ if [ "${1:-}" = "restart" ]; then RESTART=1; shift; fi
 RUN=$1; SPEED=${2:-1}
 mkdir -p "$LOGS"
 [ -f "$LOGS/approval_token" ] || head -c 18 /dev/urandom | base64 | tr -d '/+=' > "$LOGS/approval_token"
-if [ $RESTART = 1 ]; then pkill -f "uvicorn dashboard.app" || true; pkill -f "coordinator.main" || true; sleep 1; fi
+if [ $RESTART = 1 ]; then pkill -f "uvicorn dashboard.app" || true; pkill -f "coordinator.main" || true; sleep 1
+elif pgrep -f "cloudflared tunnel" > /dev/null; then
+  # A second start would add another tunnel and coordinator next to the running ones.
+  echo "a demo is already running: use 'restart' to switch runs (same URL), or 'stop' first"
+  grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" "$LOGS/tunnel.log" | head -1
+  exit 1
+fi
 rm -f "$RUN/coverage.db" "$RUN/coverage.db-wal" "$RUN/coverage.db-shm"
 
 # Low priority so a live SLAM run on the same 2 vCPUs always wins.
