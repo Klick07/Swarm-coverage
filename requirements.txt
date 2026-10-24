@@ -1,2 +1,4 @@
 opencv-contrib-python==5.0.0.93
 numpy==2.5.4
+pyyaml==6.0.3
+pytest==8.4.2
