@@ -36,6 +36,7 @@ class FrontEnd(Node):
         self.frames_dir = args.frames_dir
         if self.frames_dir:
             os.makedirs(self.frames_dir, exist_ok=True)
+            os.makedirs(f"{self.frames_dir}_right", exist_ok=True)  # Also save right frames for dense reconstruction
         ns = f"/r{args.robot}/stereo_camera"
         self.pub = {side: self.create_publisher(Image, f"{ns}/{side}/image_rect_color", 10)
                     for side in ("left", "right")}
@@ -61,6 +62,7 @@ class FrontEnd(Node):
         stamp_ns = msg_l.header.stamp.sec * 10**9 + msg_l.header.stamp.nanosec
         if passed and self.frames_dir:
             cv2.imwrite(f"{self.frames_dir}/{stamp_ns}.jpg", left, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            cv2.imwrite(f"{self.frames_dir}_right/{stamp_ns}.jpg", right, [cv2.IMWRITE_JPEG_QUALITY, 85])
         record = {"robot": self.robot, "stamp_ns": stamp_ns,
                   **scores, "passed": passed, "ms": round((time.perf_counter() - t0) * 1000, 1)}
         self.pub_q.publish(String(data=json.dumps(record)))

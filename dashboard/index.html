@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Swarm Coverage</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 :root {
   --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e3e1dc; --grid: #ecebe7;
@@ -77,6 +78,8 @@ td.num { font-variant-numeric: tabular-nums; }
 .cam-msg .t { margin-right: 6px; }
 :root { --status-good: #0ca30c; --status-warning: #fab219; }
 :root { --crossed-line: #8e8d86; }
+.pc-section { margin-top: 16px; }
+.pc-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; }
 .box.hatch { border: 1px dashed var(--crossed-line);
   background: repeating-linear-gradient(45deg, var(--crossed-line) 0 1.5px, transparent 1.5px 4px); }
 .alert { display: none; position: sticky; top: 0; z-index: 5; margin: 0 16px 12px; padding: 10px 14px;
@@ -163,6 +166,18 @@ td.num { font-variant-numeric: tabular-nums; }
       <span><span class="box" style="border:1px solid var(--seen-line)"></span>Seen by one camera</span>
     </div>
   </section>
+  <section class="wide">
+    <h2>3D Point Cloud</h2>
+    <p class="sub note">Stereo depth of every Swarm-SLAM keyframe, placed at its merged-map pose and re-placed after each optimization. Grows with the replay: each camera's points appear once it has reached them, with its path and current position (diamond). Colored by camera; floor at z = 0.</p>
+    <div class="pc-section">
+      <button class="pc-btn" id="pc-btn" onclick="loadPointCloud()">📥 Download Point Cloud</button>
+      <button class="pc-btn" id="pc-refresh" onclick="refreshPointCloud()">🔄 Refresh View</button>
+      <span id="pc-status" class="sub"></span>
+    </div>
+    <div id="pc-viewer" style="width: 100%; height: 500px; margin-top: 12px; border-radius: 6px; overflow: hidden;">
+      <div style="display: grid; place-items: center; height: 100%; color: var(--text-muted); font-size: 12px;">Loading 3D viewer...</div>
+    </div>
+  </section>
   <section>
     <h2>Waiting for a human</h2>
     <div id="pending"></div>
@@ -211,6 +226,129 @@ function refreshFrames() {
     next.src = `/api/frame/${r}?t=${Date.now()}`;
   }
 }
+
+function loadPointCloud() {
+  const btn = document.getElementById("pc-btn");
+  const status = document.getElementById("pc-status");
+  btn.disabled = true;
+  status.textContent = "Loading...";
+  
+  fetch("/api/pointcloud")
+    .then(resp => {
+      if (!resp.ok) throw new Error("Point cloud not available");
+      return resp.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "pointcloud.pcd";
+      a.click();
+      URL.revokeObjectURL(url);
+      status.textContent = "Downloaded!";
+      setTimeout(() => { btn.disabled = false; status.textContent = ""; }, 2000);
+    })
+    .catch(err => {
+      status.textContent = err.message;
+      btn.disabled = false;
+    });
+}
+
+// The cloud is downloaded once (again only when the builder rewrites it) and then grown in step with
+// the replay: each point carries the camera that saw it and when, and render(s) moves the cut-off to
+// the frame each camera is on now.
+let pc = null, pcLoading = false, pcCut = null, pcDrawn = "", pcState = null;
+
+function refreshPointCloud() {
+  if (pcLoading) return;
+  pcLoading = true;
+  const status = document.getElementById("pc-status");
+  fetch("/api/pointcloud/json", { cache: "no-store" })
+    .then(resp => {
+      if (!resp.ok) throw new Error(resp.status === 404 ? "Point cloud not built yet" : `Point cloud error ${resp.status}`);
+      return resp.json();
+    })
+    .then(data => { pc = parsePointCloud(data); pcDrawn = ""; if (pcState) updatePointCloudCut(pcState); })
+    .catch(err => { status.textContent = err.message; })
+    .finally(() => { pcLoading = false; });
+}
+
+function parsePointCloud(d) {
+  const n = d.count, x = new Float32Array(n), y = new Float32Array(n), z = new Float32Array(n), color = new Array(n);
+  for (let i = 0; i < n; i++) {
+    x[i] = d.xyz[3 * i] / 100; y[i] = d.xyz[3 * i + 1] / 100; z[i] = d.xyz[3 * i + 2] / 100;
+    color[i] = "#" + d.rgb[i].toString(16).padStart(6, "0");
+  }
+  // Box bounds from the 0.5-99.5 percentiles, so a few stray stereo points don't shrink the room.
+  const q = (a, f) => { const s = Float32Array.from(a).sort(); return s[Math.floor(f * (s.length - 1))]; };
+  const lo = [x, y, z].map(a => n ? q(a, 0.005) : 0), hi = [x, y, z].map(a => n ? q(a, 0.995) : 1);
+  return { ...d, x, y, z, color, lo, hi };
+}
+
+// Called from render(s) every second: cut-off per camera = its current replay frame, in ms after t0.
+function updatePointCloudCut(s) {
+  pcState = s;
+  // First load and rebuilds both start here: the page's load event can wait on camera images indefinitely.
+  if (s.pointcloud_updated && (!pc || s.pointcloud_updated !== pc.updated)) refreshPointCloud();
+  if (!pc || pc.t0_ns == null || !s.cameras.length) { pcCut = null; }
+  else {
+    pcCut = {};
+    for (const c of s.cameras) pcCut[c.robot] = (c.stamp_ns - pc.t0_ns) / 1e6;
+  }
+  drawPointCloud();
+}
+
+function drawPointCloud() {
+  if (!pc) return;
+  const key = JSON.stringify(pcCut) + pc.updated;
+  if (key === pcDrawn) return;  // replay hasn't moved; leave the plot alone
+  pcDrawn = key;
+  const viewer = document.getElementById("pc-viewer");
+  const status = document.getElementById("pc-status");
+  if (!pc.count) {
+    viewer.innerHTML = '<div style="display: grid; place-items: center; height: 100%; color: var(--text-muted);">No points to display</div>';
+    return;
+  }
+  const seen = i => !pcCut || pc.robot == null || (pcCut[pc.robot[i]] ?? -1) >= pc.t_ms[i];
+  const x = [], y = [], z = [], color = [];
+  for (let i = 0; i < pc.count; i++) {
+    if (seen(i)) { x.push(pc.x[i]); y.push(pc.y[i]); z.push(pc.z[i]); color.push(pc.color[i]); }
+  }
+  const css = getComputedStyle(document.documentElement);
+  const v = name => css.getPropertyValue(name).trim();
+  const traces = [{ x, y, z, type: "scatter3d", mode: "markers", hoverinfo: "skip", showlegend: false,
+                    marker: { size: 1.6, color, opacity: 0.9 } }];
+  for (const [r, path] of Object.entries(pc.paths || {})) {
+    const upto = path.filter(p => !pcCut || (pcCut[r] ?? -1) >= p[0] * 1000);
+    if (!upto.length) continue;
+    const ink = v(`--robot-${r}`), now = upto[upto.length - 1];
+    traces.push({ x: upto.map(p => p[1]), y: upto.map(p => p[2]), z: upto.map(p => p[3]), type: "scatter3d",
+                  mode: "lines", line: { color: ink, width: 4 }, hoverinfo: "skip", name: `Camera ${r}` });
+    traces.push({ x: [now[1]], y: [now[2]], z: [now[3]], type: "scatter3d", mode: "markers", showlegend: false,
+                  marker: { size: 6, color: ink, symbol: "diamond", line: { color: v("--text-primary"), width: 1 } },
+                  hovertemplate: `Camera ${r} now<extra></extra>` });
+  }
+  // Fixed box = the whole cloud, so the room fills in place instead of the axes rescaling as it grows.
+  const span = pc.hi.map((h, k) => Math.max(h - pc.lo[k], 0.1)), big = Math.max(...span);
+  const axis = (title, k) => ({ title, range: [pc.lo[k], pc.hi[k]], gridcolor: v("--grid"), zerolinecolor: v("--grid"),
+                                color: v("--text-muted"), showbackground: false });
+  if (!viewer.classList.contains("js-plotly-plot")) viewer.innerHTML = "";
+  Plotly.react(viewer, traces, {
+    margin: { l: 0, r: 0, b: 0, t: 0 }, paper_bgcolor: "rgba(0,0,0,0)",
+    uirevision: "keep",  // growing cloud keeps the current rotation/zoom
+    legend: { x: 0, y: 1, font: { color: v("--text-secondary") }, bgcolor: "rgba(0,0,0,0)" },
+    scene: {
+      aspectmode: "manual", aspectratio: { x: span[0] / big, y: span[1] / big, z: span[2] / big },  // metres stay metres
+      xaxis: axis("X (m)", 0), yaxis: axis("Y (m)", 1), zaxis: axis("Z up (m)", 2),
+      camera: { up: { x: 0, y: 0, z: 1 }, eye: { x: 0.45, y: -0.75, z: 0.95 } },  // high oblique: room layout readable
+    },
+  }, { responsive: true, displaylogo: false });
+  const total = pc.count < pc.total ? ` (sample of ${pc.total.toLocaleString()})` : "";
+  status.textContent = pcCut
+    ? `Replay: ${x.length.toLocaleString()} of ${pc.count.toLocaleString()} points seen so far${total}`
+    : `Showing ${pc.count.toLocaleString()} points${total}, updated ${new Date(pc.updated * 1000).toLocaleTimeString()}`;
+}
+
 
 function renderCameras(s) {
   (s.sequences || []).forEach((seq, r) => { const el = document.getElementById(`seq${r}`); if (el) el.textContent = `EuRoC ${seq}`; });
@@ -279,6 +417,7 @@ function render(s) {
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
   drawMap(s);
   renderCameras(s);
+  updatePointCloudCut(s);
   announce(s.pending);
   // Redraw cards only when the pending set changes, so the match images don't reload every second.
   const pendingKey = s.pending.map(o => o.overlap_id).join(",");

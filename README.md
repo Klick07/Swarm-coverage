@@ -33,6 +33,17 @@ See [Limitations](#limitations).
 ![Merged map, Vicon Room 1](docs/figures/merge_vicon_room1.png)
 ![Merged map before and after the frame fix](docs/figures/merge_before_after.png)
 
+### 3D point cloud of the merged map
+
+Each Swarm-SLAM keyframe's stereo depth (OpenCV 5 SGBM on the rectified pair), placed at its
+merged-map pose and colored by camera. On the dashboard the cloud grows with the replay: each camera's
+points appear once it has reached them, along with its path and current position (diamond).
+Below, the Vicon Room run (`dense_live`) in fast-forward: 9.5 minutes of flight from 3 cameras,
+1,221 keyframes, 1.69 M points after 4 cm voxel filtering (60,000 drawn in the browser).
+
+![3D point cloud building up during the replay](docs/figures/pointcloud_building.gif)
+![Finished 3D point cloud, Vicon Room 1](docs/figures/pointcloud_vicon_room1.png)
+
 ## How it works
 
 1. **Front end (`frontend/`, OpenCV 5.0.0).** It rectifies each stereo pair (`stereoRectify`,
@@ -55,6 +66,14 @@ See [Limitations](#limitations).
    approval cards showing both keyframes and the matches, the notification feed, and the
    decision log. It is served on localhost and published through a Cloudflare quick tunnel.
    Answering an approval needs a token.
+6. **3D point cloud (`scripts/build_pointcloud.py`).** It runs alongside the robots, rebuilding
+   every 10 s. For each keyframe it computes SGBM disparity once on the saved rectified pair
+   (stride 4, depth 0.3–4 m) and caches the camera-frame points. Each pass places them with the
+   latest optimized Swarm-SLAM pose graph, so loop closures straighten the cloud too. It merges points
+   in 4 cm voxels per camera (each voxel must be hit twice) and levels the cloud so the floor (found
+   by RANSAC) is z = 0. It writes `pointcloud.pcd`, where each point also records its camera and when it
+   was first seen, plus `pointcloud_traj.json` with the camera paths. The dashboard downloads the cloud
+   once and shows only what the replay has reached.
 
 ## Repository
 
@@ -66,6 +85,7 @@ See [Limitations](#limitations).
 | `launch/euroc_swarm.launch.py`, `config/cslam_stereo.yaml` | 3-robot launch; our copy of the Swarm-SLAM config |
 | `coordinator/` | recorder, coordinator loop, Bedrock agent, OpenCV 5 re-verification, SQLite store |
 | `dashboard/` | FastAPI app and single-page dashboard |
+| `scripts/build_pointcloud.py` | dense 3D point cloud from keyframe stereo + Swarm-SLAM poses (live with `--watch`) |
 | `eval/` | ATE vs ground truth, coverage precision/recall, latency, failure timeline, look-alike search, plots |
 | `scripts/` | EC2 setup, OpenCV 5 env, EuRoC download, run, demo server, evidence checks |
 | `tests/` | 15 unit tests (rectification, quality, evaluation, coordinator guardrails) |
@@ -99,6 +119,9 @@ ssh ubuntu@<ec2> 'pip install --user --break-system-packages remotezip==0.12.3 &
 # 4. Run 3 robots (~15 min at quarter speed); calibration is generated per sequence.
 #    Optional failure injection as the 5th argument, e.g. "r1:blank:0.40:0.47,r2:shake:0.60:0.66"
 ssh ubuntu@<ec2> 'cd ~/OpenCVH && SEQS=V1_01_easy,V1_02_medium,V1_03_difficult bash scripts/run_euroc.sh myrun 0.25 2 900'
+
+#    The launch also rebuilds ~/runs/myrun/pointcloud.pcd every 10 s. To rebuild a finished run's cloud:
+ssh ubuntu@<ec2> 'cd ~/OpenCVH && ~/cv5env/bin/python -m scripts.build_pointcloud ~/runs/myrun'
 
 # 5. Evaluate (copy ~/runs/myrun and the EuRoC ground-truth CSVs to gt/)
 python -m eval.cslam_eval runs/myrun gt          # ATE per robot and joint
@@ -138,6 +161,9 @@ Python packages for the cslam nodes are pinned in `scripts/ec2_setup.sh`.
   loop closures, which Swarm-SLAM reports at most once per 5 s. The dashboard shows where paths cross, but doesn't claim them.
 - **2 of 6 planted look-alike closures still auto-cover.** Odometry auto-reset keeps the map
   complete after a failure, but loses the motion during the outage (0.34 m joint ATE vs 0.08 m).
+- **The point cloud is only as good as the poses.** Walls come out a few cm thick where cameras
+  overlap. Robot 2 (V1_03_difficult, 0.64 m ATE in `dense_live`) leaves visible doubled surfaces.
+  Stereo depth past ~4 m and white walls are dropped or noisy.
 - The quick-tunnel URL changes when the tunnel restarts.
 
 ## Credit and license

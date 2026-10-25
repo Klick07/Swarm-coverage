@@ -16,6 +16,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import yaml
 from fastapi import FastAPI, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -90,6 +91,7 @@ def state():
         "decisions": decisions,
         "counts": rows("SELECT state, COUNT(*) AS n FROM overlaps GROUP BY state"),
         "ignored": rows("SELECT COUNT(*) AS n FROM decisions WHERE trigger='overlap_rejected_by_swarm_slam'")[0]["n"],
+        "pointcloud_updated": pc.stat().st_mtime if (pc := Path(f"{RUN_DIR}/pointcloud.pcd")).exists() else None,
     }
 
 
@@ -214,6 +216,56 @@ def devices():
     return [{"id": c["id"], "url": c.get("url", ""), "layout": d.get("layout"), "width": d.get("width"),
              "height": d.get("height"), "fps": d.get("fps"), "status": "not connected", "assumed": True}
             for c in cfg.get("cameras", [])]
+
+
+POINTCLOUD_WEB_POINTS = 60000   # Plotly WebGL stays smooth; the .pcd download has every point
+_pc_cache = {"key": None, "body": None}
+
+
+@app.get("/api/pointcloud")
+def pointcloud():
+    """The merged dense point cloud as written by scripts/build_pointcloud.py (binary PCD)."""
+    path = Path(f"{RUN_DIR}/pointcloud.pcd")
+    if not path.exists():
+        raise HTTPException(404, "point cloud not built yet")
+    return FileResponse(path, media_type="application/octet-stream", filename="pointcloud.pcd",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/pointcloud/json")
+def pointcloud_json():
+    """A random subset of the point cloud for the 3D view.
+
+    xyz in cm ints, rgb as 0xRRGGBB, and per point the camera and ms after t0_ns at which it was
+    first seen, plus each camera's keyframe path ([s, x, y, z]); the page shows only what the
+    replay has reached so far. Clouds without robot/t fields (older builds) come back with nulls."""
+    path = Path(f"{RUN_DIR}/pointcloud.pcd")
+    if not path.exists():
+        raise HTTPException(404, "point cloud not built yet")
+    st = path.stat()
+    key = (st.st_mtime_ns, st.st_size)
+    if _pc_cache["key"] != key:
+        raw = path.read_bytes()
+        start = raw.index(b"DATA binary\n") + len(b"DATA binary\n")
+        header = raw[:start].decode().splitlines()
+        fields = next(line.split()[1:] for line in header if line.startswith("FIELDS"))
+        data = np.frombuffer(raw, dtype=np.float32, offset=start).reshape(-1, len(fields))
+        total = len(data)
+        if total > POINTCLOUD_WEB_POINTS:
+            data = data[np.random.default_rng(0).choice(total, POINTCLOUD_WEB_POINTS, replace=False)]
+        col = {f: data[:, i] for i, f in enumerate(fields)}
+        timed = "robot" in col and "t" in col
+        traj = Path(f"{RUN_DIR}/pointcloud_traj.json")
+        extra = json.loads(traj.read_text()) if timed and traj.exists() else {}
+        _pc_cache["body"] = {
+            "total": total, "count": len(data), "updated": st.st_mtime,
+            "xyz": np.round(data[:, :3] * 100).astype(int).ravel().tolist(),
+            "rgb": col["rgb"].copy().view(np.uint32).tolist(),
+            "robot": col["robot"].astype(int).tolist() if timed else None,
+            "t_ms": np.round(col["t"] * 1000).astype(int).tolist() if timed else None,
+            "t0_ns": extra.get("t0_ns"), "paths": extra.get("paths", {})}
+        _pc_cache["key"] = key
+    return _pc_cache["body"]
 
 
 @app.post("/api/approve/{overlap_id}")

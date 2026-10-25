@@ -33,7 +33,10 @@ def setup(context):
     # out in the optical frame while odometry was in camera_link, so whole robots were merged
     # rotated by exactly that 120 deg (run euroc3_r025_b). Its own KITTI launch uses identity too.
     actions = [ExecuteProcess(cmd=[CV5_PYTHON, "-m", "coordinator.recorder", "--robots", str(robots),
-                                   "--out", f"{out}/events.jsonl"], **py)]
+                                   "--out", f"{out}/events.jsonl"], **py),
+               # Dense point cloud for the dashboard: keyframe stereo depth at Swarm-SLAM's merged poses.
+               ExecuteProcess(cmd=["nice", "-n", "10", CV5_PYTHON, "-m", "scripts.build_pointcloud", out,
+                                   "--watch", "10"], **py)]
     for i in range(robots):
         ns, mav0 = f"/r{i}", f"{DATA}/{sequences[i]}/mav0"
         cam = f"{ns}/stereo_camera"
