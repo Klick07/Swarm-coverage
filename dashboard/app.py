@@ -1,4 +1,4 @@
-"""Dashboard: trajectories, coverage per area, notification feed, pending approvals.
+"""Dashboard: camera views, coverage per area, notifications, approvals, uploads, devices.
 
   uvicorn dashboard.app:app --port 8000      (RUN_DIR=runs/<run> selects the run)
 
@@ -8,14 +8,29 @@ coverage record stays unchanged until a person has answered.
 import hmac
 import json
 import os
+import re
+import shutil
 import sqlite3
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException
+import yaml
+from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from dashboard.uploads import analyze_video, write_meta
+
 RUN_DIR = os.environ.get("RUN_DIR", "runs/euroc3_r025_d")
+APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", os.path.expanduser("~/uploads")))
+# Cloudflare's free quick tunnel rejects request bodies over 100 MB.
+MAX_UPLOAD_BYTES = 95 * 1024 * 1024
+MIN_FREE_BYTES_AFTER = 1024 ** 3      # the EC2 disk is small; keep 1 GB free for runs
+VIDEO_TYPES = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
+ANALYSIS = ThreadPoolExecutor(max_workers=1)   # one video at a time on 2 vCPU
+UPLOAD_ID = re.compile(r"^[0-9a-f]{12}$")
 
 
 def run_sequences(run_dir):
@@ -27,7 +42,8 @@ def run_sequences(run_dir):
     except FileNotFoundError:
         pass
     return ["MH_01_easy", "MH_02_easy", "MH_03_medium"]
-APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
+
+
 app = FastAPI(title="Swarm-SLAM coordinator")
 
 
@@ -95,11 +111,103 @@ def overlap_matches(overlap_id: int):
     return FileResponse(path, media_type="image/jpeg")
 
 
+def require_token(token):
+    # The dashboard is public through the tunnel: viewing is open, acting needs the operator token.
+    if APPROVAL_TOKEN and not hmac.compare_digest(token, APPROVAL_TOKEN):
+        raise HTTPException(403, "operator token required")
+
+
+def upload_dir(upload_id):
+    if not UPLOAD_ID.match(upload_id):
+        raise HTTPException(404, "no such upload")
+    d = UPLOAD_DIR / upload_id
+    if not (d / "meta.json").exists():
+        raise HTTPException(404, "no such upload")
+    return d
+
+
+@app.post("/api/uploads", status_code=201)
+async def upload(file: UploadFile, x_approval_token: str = Header(default="")):
+    """Store an uploaded video and queue its OpenCV 5 quality analysis."""
+    require_token(x_approval_token)
+    name = os.path.basename(file.filename or "video")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in VIDEO_TYPES:
+        raise HTTPException(415, f"unsupported file type {ext or '(none)'}; use {', '.join(sorted(VIDEO_TYPES))}")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(UPLOAD_DIR).free - MAX_UPLOAD_BYTES < MIN_FREE_BYTES_AFTER:
+        raise HTTPException(507, "not enough disk space on the server for another upload")
+    upload_id = uuid.uuid4().hex[:12]
+    d = UPLOAD_DIR / upload_id
+    d.mkdir()
+    size, path = 0, d / f"video{ext}"
+    try:
+        with open(path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, f"file is larger than {MAX_UPLOAD_BYTES // 2**20} MB")
+                out.write(chunk)
+    except HTTPException:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+    meta = write_meta(str(d), id=upload_id, name=name[:120], size_bytes=size, created=time.time(), status="queued")
+    ANALYSIS.submit(analyze_video, str(path), str(d))
+    return meta
+
+
+@app.get("/api/uploads")
+def list_uploads():
+    if not UPLOAD_DIR.exists():
+        return []
+    metas = []
+    for meta_path in UPLOAD_DIR.glob("*/meta.json"):
+        try:
+            m = json.load(open(meta_path))
+        except (OSError, ValueError):
+            continue  # being written
+        m.pop("timeline", None)
+        metas.append(m)
+    return sorted(metas, key=lambda m: m.get("created", 0), reverse=True)
+
+
+@app.get("/api/uploads/{upload_id}")
+def upload_detail(upload_id: str):
+    return json.load(open(upload_dir(upload_id) / "meta.json"))
+
+
+@app.get("/api/uploads/{upload_id}/thumb")
+def upload_thumb(upload_id: str):
+    path = upload_dir(upload_id) / "thumb.jpg"
+    if not path.exists():
+        raise HTTPException(404, "no thumbnail yet")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.delete("/api/uploads/{upload_id}")
+def delete_upload(upload_id: str, x_approval_token: str = Header(default="")):
+    require_token(x_approval_token)
+    d = upload_dir(upload_id)
+    if json.load(open(d / "meta.json")).get("status") in ("queued", "processing"):
+        raise HTTPException(409, "still being analyzed")
+    shutil.rmtree(d)
+    return {"deleted": upload_id}
+
+
+@app.get("/api/devices")
+def devices():
+    """Wi-Fi camera agents from config/cameras.yaml. Live connection is not built yet."""
+    cfg_path = Path(__file__).resolve().parent.parent / "config" / "cameras.yaml"
+    cfg = yaml.safe_load(open(cfg_path)) if cfg_path.exists() else {"cameras": []}
+    d = cfg.get("defaults", {})
+    return [{"id": c["id"], "url": c.get("url", ""), "layout": d.get("layout"), "width": d.get("width"),
+             "height": d.get("height"), "fps": d.get("fps"), "status": "not connected", "assumed": True}
+            for c in cfg.get("cameras", [])]
+
+
 @app.post("/api/approve/{overlap_id}")
 def approve(overlap_id: int, approve: bool, x_approval_token: str = Header(default="")):
-    # The dashboard is public through the tunnel: viewing is open, answering needs the token.
-    if APPROVAL_TOKEN and not hmac.compare_digest(x_approval_token, APPROVAL_TOKEN):
-        raise HTTPException(403, "approval token required")
+    require_token(x_approval_token)
     with db() as con:
         cur = con.execute("UPDATE overlaps SET state=?, resolved_by='human' WHERE overlap_id=? AND state='pending'",
                           ("approved" if approve else "rejected", overlap_id))

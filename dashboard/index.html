@@ -85,6 +85,26 @@ td.num { font-variant-numeric: tabular-nums; }
 .alert.on { display: flex; }
 .alert b::before { content: "▲ "; color: var(--status-warning); }
 .alert button { padding: 4px 12px; }
+.note { margin: 0 0 10px; font-size: 12px; }
+.upload { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.upload input[type=file] { font: inherit; color: var(--text-secondary); max-width: 100%; }
+.bar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; margin: 4px 0 6px; }
+.bar > div { height: 100%; width: 0; background: var(--robot-0); transition: width .2s; }
+.vid { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--grid); }
+.vid img { width: 120px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; background: #000; }
+.vid .thumb-none { width: 120px; aspect-ratio: 4 / 3; border-radius: 4px; background: var(--grid); }
+.vid b { word-break: break-all; }
+.vid .meta { font-size: 12px; color: var(--text-secondary); }
+.vid .meta span { margin-right: 10px; white-space: nowrap; }
+.timeline { position: relative; height: 10px; border-radius: 3px; background: var(--grid); margin: 6px 0 2px; }
+.timeline i { position: absolute; top: 0; bottom: 0; background: var(--status-warning); border-radius: 2px; }
+.vid .del { padding: 2px 10px; font-size: 12px; margin-top: 4px; }
+.chip.planned { margin-left: 8px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-secondary); }
+.devices { display: grid; gap: 8px; }
+.dev { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 10px; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.dev .meta { font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+.dev button { grid-row: 1 / span 3; grid-column: 2; padding: 4px 12px; opacity: .5; cursor: not-allowed; }
 .pair { margin: 0 0 10px; }
 .pair img { width: 100%; display: block; border-radius: 4px; background: #000; }
 .pair figcaption { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
@@ -105,6 +125,26 @@ td.num { font-variant-numeric: tabular-nums; }
   <section class="wide">
     <h2>Live camera views (rectified by the OpenCV 5 front end)</h2>
     <div class="cams" id="cams"></div>
+  </section>
+  <section>
+    <h2>Input · upload footage</h2>
+    <p class="sub note">Each video gets the OpenCV 5 front end's quality analysis: tracking, features and blur over the
+      whole clip, with weak stretches marked by the coordinator's rule. A single video has no stereo partner or
+      calibration, so it does not enter Swarm-SLAM. Max 95 MB; uploading needs the operator token.</p>
+    <form id="upload-form" class="upload" onsubmit="return startUpload(event)">
+      <input type="file" id="upload-file" accept="video/*,.mp4,.mov,.avi,.mkv,.m4v,.webm" required>
+      <button class="approve" type="submit" id="upload-btn">Upload and analyze</button>
+    </form>
+    <div class="bar" id="upload-progress" hidden><div id="upload-fill"></div></div>
+    <p class="sub" id="upload-msg" role="status"></p>
+    <div id="uploads"></div>
+  </section>
+  <section>
+    <h2>Devices · Wi-Fi cameras <span class="chip planned">planned · not built yet</span></h2>
+    <p class="sub note">Each walker's stereo camera will stream here over Wi-Fi, and that walker's alerts
+      (covered, slow down, tracking lost) will go to their phone. The addresses below are from
+      <code>config/cameras.yaml</code> and are assumed, not tested.</p>
+    <div id="devices" class="devices"></div>
   </section>
   <section>
     <h2>Merged map</h2>
@@ -284,6 +324,77 @@ function announce(pending) {
   }
 }
 
+// ---- Input: uploads ------------------------------------------------------------------------
+const MAX_UPLOAD_MB = 95;
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function startUpload(ev, retry = true) {
+  ev && ev.preventDefault();
+  const f = document.getElementById("upload-file").files[0], msg = document.getElementById("upload-msg");
+  if (!f) return false;
+  if (f.size > MAX_UPLOAD_MB * 1024 * 1024) { msg.textContent = `That file is ${(f.size / 2**20).toFixed(0)} MB; the limit is ${MAX_UPLOAD_MB} MB.`; return false; }
+  const xhr = new XMLHttpRequest(), bar = document.getElementById("upload-progress"), fill = document.getElementById("upload-fill");
+  const data = new FormData(); data.append("file", f);
+  xhr.open("POST", "/api/uploads");
+  xhr.setRequestHeader("X-Approval-Token", token(false));
+  xhr.upload.onprogress = e => { if (e.lengthComputable) fill.style.width = `${(100 * e.loaded / e.total).toFixed(0)}%`; };
+  xhr.onload = () => {
+    bar.hidden = true; document.getElementById("upload-btn").disabled = false;
+    if (xhr.status === 403 && retry) { token(true); return startUpload(null, false); }
+    msg.textContent = xhr.status === 201 ? `Uploaded ${f.name}. Analysis is queued.` : `Upload failed (${xhr.status}): ${xhr.responseText}`;
+    if (xhr.status === 201) document.getElementById("upload-form").reset();
+    refreshUploads();
+  };
+  xhr.onerror = () => { bar.hidden = true; document.getElementById("upload-btn").disabled = false; msg.textContent = "Upload failed: network error."; };
+  bar.hidden = false; fill.style.width = "0"; document.getElementById("upload-btn").disabled = true;
+  msg.textContent = `Uploading ${f.name}…`;
+  xhr.send(data);
+  return false;
+}
+async function deleteUpload(id, retry = true) {
+  const r = await fetch(`/api/uploads/${id}`, {method: "DELETE", headers: {"X-Approval-Token": token(false)}});
+  if (r.status === 403 && retry) { token(true); return deleteUpload(id, false); }
+  if (!r.ok) alert(await r.text());
+  refreshUploads();
+}
+function renderUpload(u) {
+  const st = {queued: "Queued", processing: `Analyzing… ${Math.round((u.progress || 0) * 100)}%`, done: "Analyzed", failed: "Failed"}[u.status] || u.status;
+  const info = u.duration_s ? `<span>${mmss(u.duration_s)}</span><span>${u.width}×${u.height}</span><span>${u.fps} fps</span>` : "";
+  let body = `<div class="meta"><span>${st}</span><span>${(u.size_bytes / 2**20).toFixed(1)} MB</span>${info}</div>`;
+  if (u.status === "done") {
+    const segs = (u.weak_segments || []).map(([a, b]) => `<i style="left:${100 * a / u.duration_s}%;width:${Math.max(0.6, 100 * (b - a) / u.duration_s)}%" title="weak ${mmss(a)}–${mmss(b)}"></i>`).join("");
+    body += `<div class="timeline" role="img" aria-label="Weak-tracking stretches over the clip">${segs}</div>
+      <div class="meta"><span>Tracking <b>${u.median_track ?? "–"}</b></span><span>Features <b>${u.median_features}</b></span>
+      <span>Blur <b>${u.median_blur}</b></span><span>Weak <b>${Math.round(100 * u.weak_share)}%</b> of the clip</span></div>
+      <div class="meta">${(u.weak_segments || []).length ? "Weak stretches: " + u.weak_segments.slice(0, 6).map(([a, b]) => `${mmss(a)}–${mmss(b)}`).join(", ") + (u.weak_segments.length > 6 ? "…" : "") : "No weak stretches of 1 s or more."}
+      · ${u.samples} frames scored in ${u.analysis_s} s</div>`;
+  }
+  if (u.status === "failed") body += `<div class="meta">${esc(u.error)}</div>`;
+  const thumb = u.status === "done" ? `<img src="/api/uploads/${u.id}/thumb" alt="">` : '<div class="thumb-none"></div>';
+  const del = ["done", "failed"].includes(u.status) ? `<button class="reject del" onclick="deleteUpload('${u.id}')">Delete</button>` : "";
+  return `<div class="vid">${thumb}<div><b>${esc(u.name)}</b>${body}${del}</div></div>`;
+}
+let lastUploads = "";
+async function refreshUploads() {
+  try {
+    const list = await (await fetch("/api/uploads")).json(), key = JSON.stringify(list);
+    if (key === lastUploads) return;  // don't reload thumbnails every poll
+    lastUploads = key;
+    document.getElementById("uploads").innerHTML = list.length ? list.map(renderUpload).join("") : '<p class="empty">No uploads yet.</p>';
+  } catch (e) { console.error(e); }
+}
+
+// ---- Devices (planned) ------------------------------------------------------------------------
+async function loadDevices() {
+  try {
+    const list = await (await fetch("/api/devices")).json();
+    document.getElementById("devices").innerHTML = list.map(d => `
+      <div class="dev"><span><span class="dot" style="background:${color(d.id)};display:inline-block;margin-right:6px"></span><b>Camera ${d.id}</b> · <span class="sub">${esc(d.status)}</span></span>
+        <button class="reject" disabled title="Live Wi-Fi connection is not built yet">Connect</button>
+        <span class="meta">Stream ${esc(d.url)} · ${esc(d.layout)} ${d.width}×${d.height} @ ${d.fps} fps (assumed)</span>
+        <span class="meta">Alerts to walker: not configured</span></div>`).join("") || '<p class="empty">No devices configured.</p>';
+  } catch (e) { console.error(e); }
+}
+
 function token(reset) {
   let t = null;
   try { t = reset ? null : localStorage.getItem("approvalToken"); } catch (e) {}
@@ -303,6 +414,9 @@ async function refresh() {
   try { render(await (await fetch("/api/state")).json()); } catch (e) { console.error(e); }
 }
 buildCameraTiles();
+loadDevices();
+refreshUploads();
+setInterval(refreshUploads, 2000);
 refresh();
 setInterval(refresh, 1000);
 refreshFrames();

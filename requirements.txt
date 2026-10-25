@@ -7,3 +7,5 @@ matplotlib==3.11.2
 boto3
 fastapi==0.121.1
 uvicorn==0.38.0
+python-multipart==0.0.20
+httpx==0.28.1  # tests only
