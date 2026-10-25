@@ -70,11 +70,15 @@ See [Limitations](#limitations).
 | `scripts/` | EC2 setup, OpenCV 5 env, EuRoC download, run, demo server, evidence checks |
 | `tests/` | 15 unit tests (rectification, quality, evaluation, coordinator guardrails) |
 | `docs/FINDINGS.md` | every verified fact and measurement, in the order it was found |
+| `docs/AGENT_RUNBOOK.md` | step-by-step deployment from scratch, written for an AI agent (with checks and permission points) |
 | `docs/REPORT.md` | technical report |
 | `docs/VIDEO_SCRIPT.md` | ≤ 5 minute demo video script |
 | `swarm.repos` | Swarm-SLAM packages pinned to the tested commits |
 
 ## Build and run
+
+**Fastest path:** give [`docs/AGENT_RUNBOOK.md`](docs/AGENT_RUNBOOK.md) to a coding agent. It lists every
+step, the checks, and the points where it must ask you (AWS keys, EC2 launch, going public).
 
 **Hardware used:** one EC2 m7i-flex.large (2 vCPU, 8 GB) with Ubuntu 24.04 (x86_64) and a
 30 GB disk, plus an IAM role with Bedrock access. The coordinator and the evaluation also run

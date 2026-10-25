@@ -9,6 +9,20 @@ REPOS_FILE=${1:-$HOME/swarm.repos}
 WS=$HOME/swarm_ws
 export DEBIAN_FRONTEND=noninteractive
 
+echo "== swap (4 GB: building and running 3 robots on 8 GB RAM)"
+if [ ! -f /swapfile ]; then
+  sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap -q /swapfile && sudo swapon /swapfile
+  echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+fi
+
+echo "== ROS 2 apt source"
+sudo apt-get update -qq
+sudo apt-get install -y -qq software-properties-common curl >/dev/null
+sudo add-apt-repository -y universe >/dev/null
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
+  | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+
 echo "== apt packages"
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
