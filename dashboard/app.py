@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import yaml
-from fastapi import FastAPI, Header, HTTPException, UploadFile
+from fastapi import FastAPI, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from dashboard.uploads import analyze_video, write_meta
@@ -31,6 +31,7 @@ MIN_FREE_BYTES_AFTER = 1024 ** 3      # the EC2 disk is small; keep 1 GB free fo
 VIDEO_TYPES = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
 ANALYSIS = ThreadPoolExecutor(max_workers=1)   # one video at a time on 2 vCPU
 UPLOAD_ID = re.compile(r"^[0-9a-f]{12}$")
+SESSION_ID = re.compile(r"^[0-9a-f]{8}$")
 
 
 def run_sequences(run_dir):
@@ -127,9 +128,18 @@ def upload_dir(upload_id):
 
 
 @app.post("/api/uploads", status_code=201)
-async def upload(file: UploadFile, x_approval_token: str = Header(default="")):
-    """Store an uploaded video and queue its OpenCV 5 quality analysis."""
+async def upload(file: UploadFile, camera: int | None = Form(None), session: str | None = Form(None),
+                 x_approval_token: str = Header(default="")):
+    """Store an uploaded video and queue its OpenCV 5 quality analysis.
+
+    camera (0-2) says which walker it belongs to; session groups the videos uploaded together
+    (one per camera). Each upload is its own request, so the 95 MB limit is per video.
+    """
     require_token(x_approval_token)
+    if camera is not None and camera not in (0, 1, 2):
+        raise HTTPException(422, "camera must be 0, 1 or 2")
+    if session is not None and not SESSION_ID.match(session):
+        raise HTTPException(422, "bad session id")
     name = os.path.basename(file.filename or "video")
     ext = os.path.splitext(name)[1].lower()
     if ext not in VIDEO_TYPES:
@@ -151,7 +161,8 @@ async def upload(file: UploadFile, x_approval_token: str = Header(default="")):
     except HTTPException:
         shutil.rmtree(d, ignore_errors=True)
         raise
-    meta = write_meta(str(d), id=upload_id, name=name[:120], size_bytes=size, created=time.time(), status="queued")
+    meta = write_meta(str(d), id=upload_id, name=name[:120], size_bytes=size, created=time.time(), status="queued",
+                      camera=camera, session=session or upload_id[:8])
     ANALYSIS.submit(analyze_video, str(path), str(d))
     return meta
 

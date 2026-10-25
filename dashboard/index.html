@@ -86,8 +86,13 @@ td.num { font-variant-numeric: tabular-nums; }
 .alert b::before { content: "▲ "; color: var(--status-warning); }
 .alert button { padding: 4px 12px; }
 .note { margin: 0 0 10px; font-size: 12px; }
-.upload { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-.upload input[type=file] { font: inherit; color: var(--text-secondary); max-width: 100%; }
+.slots { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; margin-bottom: 8px; }
+@media (max-width: 860px) { .slots { grid-template-columns: minmax(0, 1fr); } }
+.slot { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; cursor: pointer; }
+.slot input[type=file] { font: inherit; font-size: 12px; color: var(--text-secondary); max-width: 100%; }
+.slot .dot { display: inline-block; margin-right: 6px; }
+.session { border-top: 1px solid var(--border); margin-top: 6px; }
+.session-head { font-size: 12px; color: var(--text-muted); padding: 8px 0 0; }
 .bar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; margin: 4px 0 6px; }
 .bar > div { height: 100%; width: 0; background: var(--robot-0); transition: width .2s; }
 .vid { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--grid); }
@@ -123,28 +128,27 @@ td.num { font-variant-numeric: tabular-nums; }
 </div>
 <main>
   <section class="wide">
-    <h2>Live camera views (rectified by the OpenCV 5 front end)</h2>
-    <div class="cams" id="cams"></div>
-  </section>
-  <section>
-    <h2>Input · upload footage</h2>
-    <p class="sub note">Each video gets the OpenCV 5 front end's quality analysis: tracking, features and blur over the
-      whole clip, with weak stretches marked by the coordinator's rule. A single video has no stereo partner or
-      calibration, so it does not enter Swarm-SLAM. Max 95 MB; uploading needs the operator token.</p>
-    <form id="upload-form" class="upload" onsubmit="return startUpload(event)">
-      <input type="file" id="upload-file" accept="video/*,.mp4,.mov,.avi,.mkv,.m4v,.webm" required>
-      <button class="approve" type="submit" id="upload-btn">Upload and analyze</button>
+    <h2>Input · upload footage (one video per walker)</h2>
+    <p class="sub note">Choose up to three videos, one per camera, and upload them together as one session. Each video
+      gets the OpenCV 5 front end's quality analysis: tracking, features and blur over the whole clip, with weak
+      stretches marked by the coordinator's rule. A single video has no stereo partner or calibration, so the
+      videos are not merged by Swarm-SLAM. Max 95 MB per video; uploading needs the operator token.</p>
+    <form id="upload-form" class="slots" onsubmit="return startUploads(event)">
+      <label class="slot"><span><span class="dot" style="background:var(--robot-0)"></span><b>Camera 0</b></span>
+        <input type="file" id="upload-0" accept="video/*,.mp4,.mov,.avi,.mkv,.m4v,.webm"></label>
+      <label class="slot"><span><span class="dot" style="background:var(--robot-1)"></span><b>Camera 1</b></span>
+        <input type="file" id="upload-1" accept="video/*,.mp4,.mov,.avi,.mkv,.m4v,.webm"></label>
+      <label class="slot"><span><span class="dot" style="background:var(--robot-2)"></span><b>Camera 2</b></span>
+        <input type="file" id="upload-2" accept="video/*,.mp4,.mov,.avi,.mkv,.m4v,.webm"></label>
+      <button class="approve" type="submit" id="upload-btn">Upload all and analyze</button>
     </form>
     <div class="bar" id="upload-progress" hidden><div id="upload-fill"></div></div>
     <p class="sub" id="upload-msg" role="status"></p>
     <div id="uploads"></div>
   </section>
-  <section>
-    <h2>Devices · Wi-Fi cameras <span class="chip planned">planned · not built yet</span></h2>
-    <p class="sub note">Each walker's stereo camera will stream here over Wi-Fi, and that walker's alerts
-      (covered, slow down, tracking lost) will go to their phone. The addresses below are from
-      <code>config/cameras.yaml</code> and are assumed, not tested.</p>
-    <div id="devices" class="devices"></div>
+  <section class="wide">
+    <h2>Live camera views (rectified by the OpenCV 5 front end)</h2>
+    <div class="cams" id="cams"></div>
   </section>
   <section>
     <h2>Merged map</h2>
@@ -172,6 +176,13 @@ td.num { font-variant-numeric: tabular-nums; }
         <th>Blur</th><th>Track inliers</th><th>OpenCV inliers</th><th>Reason</th></tr></thead>
       <tbody id="log"></tbody>
     </table></div>
+  </section>
+  <section class="wide">
+    <h2>Devices · Wi-Fi cameras <span class="chip planned">planned · not built yet</span></h2>
+    <p class="sub note">Each walker's stereo camera will stream here over Wi-Fi, and that walker's alerts
+      (covered, slow down, tracking lost) will go to their phone. The addresses below are from
+      <code>config/cameras.yaml</code> and are assumed, not tested.</p>
+    <div id="devices" class="devices"></div>
   </section>
 </main>
 <script>
@@ -327,27 +338,44 @@ function announce(pending) {
 // ---- Input: uploads ------------------------------------------------------------------------
 const MAX_UPLOAD_MB = 95;
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-function startUpload(ev, retry = true) {
-  ev && ev.preventDefault();
-  const f = document.getElementById("upload-file").files[0], msg = document.getElementById("upload-msg");
-  if (!f) return false;
-  if (f.size > MAX_UPLOAD_MB * 1024 * 1024) { msg.textContent = `That file is ${(f.size / 2**20).toFixed(0)} MB; the limit is ${MAX_UPLOAD_MB} MB.`; return false; }
-  const xhr = new XMLHttpRequest(), bar = document.getElementById("upload-progress"), fill = document.getElementById("upload-fill");
-  const data = new FormData(); data.append("file", f);
-  xhr.open("POST", "/api/uploads");
-  xhr.setRequestHeader("X-Approval-Token", token(false));
-  xhr.upload.onprogress = e => { if (e.lengthComputable) fill.style.width = `${(100 * e.loaded / e.total).toFixed(0)}%`; };
-  xhr.onload = () => {
-    bar.hidden = true; document.getElementById("upload-btn").disabled = false;
-    if (xhr.status === 403 && retry) { token(true); return startUpload(null, false); }
-    msg.textContent = xhr.status === 201 ? `Uploaded ${f.name}. Analysis is queued.` : `Upload failed (${xhr.status}): ${xhr.responseText}`;
-    if (xhr.status === 201) document.getElementById("upload-form").reset();
+function sendOne(file, camera, session, onProgress, retry = true) {
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest(), data = new FormData();
+    data.append("file", file); data.append("camera", camera); data.append("session", session);
+    xhr.open("POST", "/api/uploads");
+    xhr.setRequestHeader("X-Approval-Token", token(false));
+    xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded);
+    xhr.onload = () => {
+      if (xhr.status === 403 && retry) { token(true); return resolve(sendOne(file, camera, session, onProgress, false)); }
+      resolve({ok: xhr.status === 201, status: xhr.status, text: xhr.responseText});
+    };
+    xhr.onerror = () => resolve({ok: false, status: 0, text: "network error"});
+    xhr.send(data);
+  });
+}
+async function startUploads(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById("upload-msg"), bar = document.getElementById("upload-progress"),
+        fill = document.getElementById("upload-fill"), btn = document.getElementById("upload-btn");
+  const picks = [0, 1, 2].map(c => ({camera: c, file: document.getElementById(`upload-${c}`).files[0]})).filter(p => p.file);
+  if (!picks.length) { msg.textContent = "Choose at least one video (one per camera, up to three)."; return false; }
+  const big = picks.find(p => p.file.size > MAX_UPLOAD_MB * 1024 * 1024);
+  if (big) { msg.textContent = `Camera ${big.camera}: ${big.file.name} is ${(big.file.size / 2**20).toFixed(0)} MB; the limit is ${MAX_UPLOAD_MB} MB per video.`; return false; }
+  const session = Array.from(crypto.getRandomValues(new Uint8Array(4)), x => x.toString(16).padStart(2, "0")).join("");
+  const total = picks.reduce((n, p) => n + p.file.size, 0);
+  let done = 0, failures = [];
+  bar.hidden = false; fill.style.width = "0"; btn.disabled = true;
+  for (const p of picks) {
+    msg.textContent = `Uploading camera ${p.camera}: ${p.file.name}…`;
+    const r = await sendOne(p.file, p.camera, session, loaded => fill.style.width = `${(100 * (done + loaded) / total).toFixed(0)}%`);
+    done += p.file.size;
+    if (!r.ok) failures.push(`camera ${p.camera} (${r.status}: ${r.text})`);
     refreshUploads();
-  };
-  xhr.onerror = () => { bar.hidden = true; document.getElementById("upload-btn").disabled = false; msg.textContent = "Upload failed: network error."; };
-  bar.hidden = false; fill.style.width = "0"; document.getElementById("upload-btn").disabled = true;
-  msg.textContent = `Uploading ${f.name}…`;
-  xhr.send(data);
+  }
+  bar.hidden = true; btn.disabled = false;
+  msg.textContent = failures.length ? `Some uploads failed: ${failures.join("; ")}`
+    : `Uploaded ${picks.length} video${picks.length > 1 ? "s" : ""} as session ${session}. Analysis is queued.`;
+  if (!failures.length) document.getElementById("upload-form").reset();
   return false;
 }
 async function deleteUpload(id, retry = true) {
@@ -371,7 +399,8 @@ function renderUpload(u) {
   if (u.status === "failed") body += `<div class="meta">${esc(u.error)}</div>`;
   const thumb = u.status === "done" ? `<img src="/api/uploads/${u.id}/thumb" alt="">` : '<div class="thumb-none"></div>';
   const del = ["done", "failed"].includes(u.status) ? `<button class="reject del" onclick="deleteUpload('${u.id}')">Delete</button>` : "";
-  return `<div class="vid">${thumb}<div><b>${esc(u.name)}</b>${body}${del}</div></div>`;
+  const cam = u.camera == null ? "" : `<span class="dot" style="background:${color(u.camera)};display:inline-block;margin-right:6px"></span>Camera ${u.camera} · `;
+  return `<div class="vid">${thumb}<div><b>${cam}${esc(u.name)}</b>${body}${del}</div></div>`;
 }
 let lastUploads = "";
 async function refreshUploads() {
@@ -379,7 +408,18 @@ async function refreshUploads() {
     const list = await (await fetch("/api/uploads")).json(), key = JSON.stringify(list);
     if (key === lastUploads) return;  // don't reload thumbnails every poll
     lastUploads = key;
-    document.getElementById("uploads").innerHTML = list.length ? list.map(renderUpload).join("") : '<p class="empty">No uploads yet.</p>';
+    // Group by session (newest first), cameras in order inside each session.
+    const sessions = [];
+    for (const u of list) {
+      let g = sessions.find(x => x.id === u.session);
+      if (!g) sessions.push(g = {id: u.session, created: u.created, items: []});
+      g.items.push(u);
+    }
+    document.getElementById("uploads").innerHTML = sessions.length ? sessions.map(g => `
+      <div class="session"><div class="session-head">Session ${esc(g.id)} · ${new Date(g.created * 1000).toLocaleString()} ·
+        ${g.items.length} video${g.items.length > 1 ? "s" : ""}</div>
+        ${g.items.sort((x, y) => (x.camera ?? 9) - (y.camera ?? 9)).map(renderUpload).join("")}</div>`).join("")
+      : '<p class="empty">No uploads yet.</p>';
   } catch (e) { console.error(e); }
 }
 

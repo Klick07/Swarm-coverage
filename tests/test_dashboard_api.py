@@ -17,10 +17,25 @@ def client(tmp_path, monkeypatch):
     return TestClient(dash.app)
 
 
-def post(client, path, name, token=TOKEN):
+def post(client, path, name, token=TOKEN, **form):
     with open(path, "rb") as f:
-        return client.post("/api/uploads", files={"file": (name, f, "video/x-msvideo")},
+        return client.post("/api/uploads", files={"file": (name, f, "video/x-msvideo")}, data=form,
                            headers={"X-Approval-Token": token})
+
+
+def test_three_videos_upload_as_one_session(client, tmp_path):
+    make_video(tmp_path / "c.avi")
+    ids = [post(client, tmp_path / "c.avi", f"walker{c}.avi", camera=c, session="ab12cd34").json()["id"]
+           for c in (0, 1, 2)]
+    listed = {u["id"]: u for u in client.get("/api/uploads").json()}
+    assert [listed[i]["camera"] for i in ids] == [0, 1, 2]
+    assert {listed[i]["session"] for i in ids} == {"ab12cd34"}
+
+
+def test_upload_rejects_bad_camera_or_session(client, tmp_path):
+    make_video(tmp_path / "c.avi")
+    assert post(client, tmp_path / "c.avi", "c.avi", camera=3).status_code == 422
+    assert post(client, tmp_path / "c.avi", "c.avi", session="../x").status_code == 422
 
 
 def test_upload_needs_the_operator_token(client, tmp_path):
