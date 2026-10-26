@@ -46,6 +46,10 @@ We tested on recorded footage, with ground truth where it exists.
 These numbers are from the earlier phase, which used the Nova coordinator. Details and the failures we hit and fixed are in [`docs/REPORT.md`](docs/REPORT.md) and [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
 ![Merged map, Vicon Room 1](docs/figures/merge_vicon_room1.png)
+The map building up while three recorded EuRoC Vicon Room 1 flights are replayed in fast-forward (the earlier Nova-phase run; recorded footage, not live capture):
+
+![3D point cloud building up during the replay](docs/figures/pointcloud_building.gif)
+
 ![3D point cloud, Vicon Room 1](docs/figures/pointcloud_vicon_room1.png)
 
 ### AirMuseum results (no accuracy claim)
