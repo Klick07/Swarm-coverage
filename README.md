@@ -1,177 +1,135 @@
 # Swarm coverage
 
-Three stereo cameras map a building together. **OpenCV 5** cleans and scores every frame,
-**Swarm-SLAM** merges the three maps, and an **Amazon Bedrock** agent tells each walker what
-to do next: *"Area covered by camera 0, camera 2 move on"*, *"Camera 1, slow down, tracking
-is weak"*. It asks a human whenever the visual evidence is weak.
+Several people map a space with stereo cameras. **Swarm coverage** merges their maps into one, tells each camera operator when an area is already covered or their tracking is weak, and asks a human before it trusts weak visual evidence.
 
-Built for the OpenCV 5 hackathon, Agentic Vision Award track.
+OpenCV 5 does the image work. Swarm-SLAM builds the shared map. A coordinator turns the evidence into decisions, and every decision is logged with the values behind it. It runs on AWS EC2.
 
-![Architecture](docs/figures/architecture.png)
+Built for the OpenCV 5 hackathon, Agentic Vision track.
 
-**What runs today.** No cameras were available, so the three "walkers" are EuRoC MAV flights:
-real stereo footage with motion-capture or laser-tracker ground truth, replayed through the full
-pipeline on AWS EC2. Two environments: an indoor room (**Vicon Room 1**, V1_01–03, the demo) and an
-industrial hall (**Machine Hall**, MH_01–03). The camera
-capture and calibration path (spec Phases 2–3 on real hardware) is designed but not built.
-See [Limitations](#limitations).
+![Architecture](docs/figures/architecture_v3.png)
 
-## Results (all measured; details in [docs/REPORT.md](docs/REPORT.md))
+> **Status.** Every result below comes from recorded footage processed on one EC2 server. Live camera streaming is not built. Near-real-time mapping is a goal and is not demonstrated: on this 2-vCPU server the stored map trailed a 1x feed by about a minute. Results from our own on-site recordings are not in yet; the capture hardware is described at the end.
+
+## Features
+
+- **OpenCV 5 front end per camera.** Stereo rectification (`stereoRectify`, `remap`), blur, ORB features, a same-row stereo check and tracking inliers (RANSAC fundamental matrix). No `cv_bridge`; images are converted directly.
+- **Multi-robot SLAM.** RTAB-Map stereo odometry with automatic reset after tracking loss, and Swarm-SLAM for keyframes, inter-robot loop closures and one merged pose graph.
+- **Coverage decisions with a human gate.** Each proposed overlap is re-checked with OpenCV 5 (ORB and MAGSAC). Strong, well-spread evidence marks the area covered and tells the other camera to move on. Weak or repetitive evidence waits for a person. The guardrail is in code, so neither rules nor a model can bypass it.
+- **Operator warnings.** Weak tracking, and "SLAM lost while the images look fine" when good frames arrive but no keyframes do.
+- **Event recorder.** One `events.jsonl` per run, so decisions can be replayed and audited without ROS.
+- **Rules-only or model coordinator.** The same rules run in code (`--rules-only`); Amazon Nova 2 Lite on Bedrock with tool calls is optional.
+- **Dashboard.** Camera views, merged map and coverage cells, approval cards with both keyframes and the matches, decision log, saved-run viewing, and a 3D point cloud.
+- **Upload jobs.** Upload, per robot, a left video, a right video and a stereo calibration (the project's YAML or a Kalibr camchain) in the browser. The server converts them (frame sync, rectification, left/right-swap check) and runs the pipeline.
+- **3D point cloud.** OpenCV 5 SGBM depth per keyframe, placed with the optimised pose graph, 4 cm voxels.
+
+## Testing and validation
+
+We tested on recorded footage, with ground truth where it exists.
+
+| Footage | What it tested | Ground truth |
+|---|---|---|
+| **EuRoC MAV**, Vicon Room 1 and Machine Hall, 3 flights each, 0.25x feed | merging, coverage claims, failure injection, thresholds | yes |
+| **AirMuseum** scenario 3, a hangar with zones, 3 robots at 10 Hz | upload jobs, cloud building, throughput on the Free-plan server | conversion not verified |
+
+### EuRoC results (measured against ground truth)
 
 | | Result |
 |---|---|
-| Merged map, 3 robots, one alignment vs ground truth | Vicon Room: **0.895 m unmerged → 0.207 m merged**. Machine Hall: **7.9–9.0 cm** (robot 2: 23.7 → 7.1 cm). |
-| OpenCV 5 rectification on real EuRoC pairs | same-row matches **0% raw, 90% rectified** (raw right image sits ~13 px higher) |
-| "Area covered" precision / recall vs ground truth | **1.00** in every run / 0.667 (room), 0.22–0.375 (hall) |
-| Weak-tracking warning after a blank wall / quick shake | **+0.3 s / +0.2 s** |
-| SLAM recovery after a blank wall | 147 s → **1.6 s** with odometry auto-reset (accuracy trade-off: 0.34 m) |
-| Look-alike false closures (6 injected) | **4 held for a human**, 2 auto-covered |
-| Coordinator (Bedrock), final replays | room: 11 auto-covered, 1 to a human; hall: 19 / 5. 0 wrong recipients, 0 fallbacks |
-| Weak-tracking rule across environments | blur threshold gave 52 nuisance warnings in the room → tracking-based rule: 15, both failures still caught |
-| Frame → "area covered" on the dashboard | ~30 s median, almost all of it Swarm-SLAM loop-closure detection |
+| Merged map, 3 robots, one alignment | Vicon Room: **0.895 m unmerged to 0.207 m merged**. Machine Hall: **7.9 to 9.0 cm** |
+| Rectification on real pairs | same-row matches **0% raw, 90% rectified** |
+| "Area covered" precision / recall | **1.00** in every run / 0.667 (room), 0.22 to 0.375 (hall) |
+| Weak-tracking warning after blank wall / quick shake | +0.3 s / +0.2 s |
+| SLAM recovery after a blank wall | 147 s to 1.6 s with odometry auto-reset (accuracy cost: 0.34 m joint) |
+| Look-alike false closures (6 injected) | 4 held for a human, 2 auto-covered |
+| Frame to "area covered" | about 30 s median at a 0.25x feed |
+
+These numbers are from the earlier phase, which used the Nova coordinator. Details and the failures we hit and fixed are in [`docs/REPORT.md`](docs/REPORT.md) and [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
 ![Merged map, Vicon Room 1](docs/figures/merge_vicon_room1.png)
-![Merged map before and after the frame fix](docs/figures/merge_before_after.png)
+![3D point cloud, Vicon Room 1](docs/figures/pointcloud_vicon_room1.png)
 
-### 3D point cloud of the merged map
+### AirMuseum results (no accuracy claim)
 
-Each Swarm-SLAM keyframe's stereo depth (OpenCV 5 SGBM on the rectified pair), placed at its
-merged-map pose and colored by camera. On the dashboard the cloud grows with the replay: each camera's
-points appear once it has reached them, along with its path and current position (diamond).
-Below, the Vicon Room run (`dense_live`) in fast-forward: 9.5 minutes of flight from 3 cameras,
-1,221 keyframes, 1.69 M points after 4 cm voxel filtering (60,000 drawn in the browser).
+- Full run at 0.25x: 595,574-point cloud, 5 overlaps applied, 235 Swarm-SLAM closures rejected.
+- Fed at 1x on this server, the stored map trailed the feed by about 66 s when the feed ended. Full tracking at 1x kept only 58 to 61% of frames. **1x is not demonstrated.**
+- No trajectory error is reported for this footage. Its reference trajectory was not verified, so any error figure would not be a valid measurement.
 
-![3D point cloud building up during the replay](docs/figures/pointcloud_building.gif)
-![Finished 3D point cloud, Vicon Room 1](docs/figures/pointcloud_vicon_room1.png)
+### What replays and compute mean here
 
-## How it works
-
-1. **Front end (`frontend/`, OpenCV 5.0.0).** It rectifies each stereo pair (`stereoRectify`,
-   `remap`) and scores it: Laplacian-variance blur, ORB features, a stereo same-row check, and
-   tracking inliers from a RANSAC fundamental matrix. It publishes rectified mono8 images to
-   Swarm-SLAM, and does not use `cv_bridge`.
-2. **SLAM.** RTAB-Map stereo odometry, then Swarm-SLAM (CosPlace ResNet-18 place
-   recognition and a GTSAM 4.2 pose graph) on three robots in one ROS 2 Jazzy domain.
-3. **Recorder (`coordinator/recorder.py`).** Writes quality scores, keyframes, inter-robot
-   closures (with Swarm-SLAM's success flag) and merged poses to one `events.jsonl` per run.
-4. **Coordinator (`coordinator/`).** Amazon Nova 2 Lite on Bedrock, using tool calls. For each
-   overlap it re-verifies the two keyframes with OpenCV 5 (ORB + MAGSAC). With ≥ 50 inliers
-   that span ≥ 10% of each image, it marks the area covered and tells the second camera to move
-   on. Otherwise it requests human approval. It also warns on weak tracking (tracking inliers
-   < 0.5 or fewer than 100 features; blur is shown but doesn't trigger, because it depends on the
-   scene), and on SLAM tracking loss while the images still look fine. Guardrails live in code: `mark_covered`
-   refuses a low-confidence overlap until a human has approved it. Every action is logged
-   with the values that triggered it.
-5. **Dashboard (`dashboard/`).** Live camera views, the merged map with coverage cells,
-   approval cards showing both keyframes and the matches, the notification feed, and the
-   decision log. It is served on localhost and published through a Cloudflare quick tunnel.
-   Answering an approval needs a token.
-6. **3D point cloud (`scripts/build_pointcloud.py`).** It runs alongside the robots, rebuilding
-   every 10 s. For each keyframe it computes SGBM disparity once on the saved rectified pair
-   (stride 4, depth 0.3–4 m) and caches the camera-frame points. Each pass places them with the
-   latest optimized Swarm-SLAM pose graph, so loop closures straighten the cloud too. It merges points
-   in 4 cm voxels per camera (each voxel must be hit twice) and levels the cloud so the floor (found
-   by RANSAC) is z = 0. It writes `pointcloud.pcd`, where each point also records its camera and when it
-   was first seen, plus `pointcloud_traj.json` with the camera paths. The dashboard downloads the cloud
-   once and shows only what the replay has reached.
+The dashboard can show a saved run. A *replay* re-runs the coordinator over recorded events at a chosen speed; it does not re-run SLAM, and the approvals it raises are generated by the replay.
 
 ## Repository
 
 | Path | What |
 |---|---|
-| `frontend/core.py` | OpenCV 5 rectification, quality scores, quality gate (no ROS) |
-| `frontend/node.py`, `rosimg.py` | ROS 2 front-end node; Image/CameraInfo without cv_bridge |
-| `frontend/euroc_replay.py`, `euroc_to_calib.py` | EuRoC replay (with failure injection); calibration import |
-| `launch/euroc_swarm.launch.py`, `config/cslam_stereo.yaml` | 3-robot launch; our copy of the Swarm-SLAM config |
-| `coordinator/` | recorder, coordinator loop, Bedrock agent, OpenCV 5 re-verification, SQLite store |
-| `dashboard/` | FastAPI app and single-page dashboard |
-| `scripts/build_pointcloud.py` | dense 3D point cloud from keyframe stereo + Swarm-SLAM poses (live with `--watch`) |
-| `eval/` | ATE vs ground truth, coverage precision/recall, latency, failure timeline, look-alike search, plots |
-| `scripts/` | EC2 setup, OpenCV 5 env, EuRoC download, run, demo server, evidence checks |
-| `tests/` | 15 unit tests (rectification, quality, evaluation, coordinator guardrails) |
-| `docs/FINDINGS.md` | every verified fact and measurement, in the order it was found |
-| `docs/AGENT_RUNBOOK.md` | step-by-step deployment from scratch, written for an AI agent (with checks and permission points) |
-| `docs/REPORT.md` | technical report |
-| `docs/VIDEO_SCRIPT.md` | ≤ 5 minute demo video script |
-| `swarm.repos` | Swarm-SLAM packages pinned to the tested commits |
+| `frontend/` | OpenCV 5 front end, EuRoC replay, calibration import |
+| `launch/`, `config/` | 3-robot launch, Swarm-SLAM configs |
+| `coordinator/` | recorder, coordinator, optional model agent, OpenCV 5 re-verification, SQLite store |
+| `dashboard/` | FastAPI app, pages, upload job API |
+| `jobs/` | upload-driven job runner |
+| `eval/` | trajectory error, coverage precision and recall, latency, failure timeline |
+| `scripts/` | EC2 setup, OpenCV 5 environment, footage download, run scripts, demo server |
+| `tests/` | 48 tests |
+| `docs/` | report, findings, deployment runbook, video script, figures |
+| `swarm.repos` | Swarm-SLAM packages pinned to tested commits |
 
 ## Build and run
 
-**Fastest path:** give [`docs/AGENT_RUNBOOK.md`](docs/AGENT_RUNBOOK.md) to a coding agent. It lists every
-step, the checks, and the points where it must ask you (AWS keys, EC2 launch, going public).
-
-**Hardware used:** one EC2 m7i-flex.large (2 vCPU, 8 GB) with Ubuntu 24.04 (x86_64) and a
-30 GB disk, plus an IAM role with Bedrock access. The coordinator and the evaluation also run
-on a Mac.
+Tested on one EC2 m7i-flex.large (2 vCPU, 8 GB), Ubuntu 24.04 x86_64, 4 GB swap, 48 GB root disk. Keep several GB of disk free; runs and derived frames fill it. The step-by-step deployment is in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ```bash
-# 1. ROS 2 Jazzy, RTAB-Map, GTSAM 4.2 (apt), Swarm-SLAM at pinned commits, CosPlace weights
+# 1. ROS 2 Jazzy, RTAB-Map, GTSAM 4.2, Swarm-SLAM at pinned commits (about 15 min)
 scp scripts/ec2_setup.sh swarm.repos ubuntu@<ec2>:~/
-ssh ubuntu@<ec2> 'bash ~/ec2_setup.sh ~/swarm.repos'          # ~15 min
+ssh ubuntu@<ec2> 'bash ~/ec2_setup.sh ~/swarm.repos'
 
-# 2. OpenCV 5 venv next to ROS (rclpy + cv2 5.0.0 in one interpreter)
+# 2. OpenCV 5 environment next to ROS
 ssh ubuntu@<ec2> 'cd ~/OpenCVH && bash scripts/setup_cv5env.sh'
 
-# 3. EuRoC footage (Vicon Room 1: 5 GB unpacked; Machine Hall MH_01-03: 6.6 GB)
-ssh ubuntu@<ec2> 'pip install --user --break-system-packages remotezip==0.12.3 &&
-  python3 ~/OpenCVH/scripts/fetch_euroc.py vicon_room1 V1_01_easy V1_02_medium V1_03_difficult'
+# 3. EuRoC footage
+ssh ubuntu@<ec2> 'python3 ~/OpenCVH/scripts/fetch_euroc.py vicon_room1 V1_01_easy V1_02_medium V1_03_difficult'
 
-# 4. Run 3 robots (~15 min at quarter speed); calibration is generated per sequence.
-#    Optional failure injection as the 5th argument, e.g. "r1:blank:0.40:0.47,r2:shake:0.60:0.66"
+# 4. Run 3 robots at quarter speed, publishing every 2nd frame
 ssh ubuntu@<ec2> 'cd ~/OpenCVH && SEQS=V1_01_easy,V1_02_medium,V1_03_difficult bash scripts/run_euroc.sh myrun 0.25 2 900'
 
-#    The launch also rebuilds ~/runs/myrun/pointcloud.pcd every 10 s. To rebuild a finished run's cloud:
-ssh ubuntu@<ec2> 'cd ~/OpenCVH && ~/cv5env/bin/python -m scripts.build_pointcloud ~/runs/myrun'
+# 5. Evaluate against ground truth (EuRoC)
+python -m eval.cslam_eval runs/myrun gt
+python -m eval.coverage_pr runs/myrun gt
 
-# 5. Evaluate (copy ~/runs/myrun and the EuRoC ground-truth CSVs to gt/)
-python -m eval.cslam_eval runs/myrun gt          # ATE per robot and joint
-python -m eval.plot_merge out.png runs/myrun:title
-python -m eval.coverage_pr runs/myrun gt         # precision / recall
-python -m eval.latency runs/myrun runs/myrun/coverage.db
-python -m eval.failure_report runs/myrun runs/myrun/coverage.db
+# 6. Coordinator: rules only, or Nova on Bedrock (needs an IAM role)
+python -m coordinator.main runs/myrun --rules-only [--speed 2]
 
-# 6. Coordinator: replay a run through Bedrock (or --rules-only, free)
-python -m coordinator.main runs/myrun [--speed 2] [--rules-only] [--wait-approvals]
+# 7. Dashboard behind a Cloudflare quick tunnel (prints the URL and the approval token)
+bash scripts/serve_demo.sh ~/runs/myrun 2
 
-# 7. Public demo on EC2: coordinator replay + dashboard + HTTPS tunnel (prints URL and token)
-ssh ubuntu@<ec2> 'cd ~/OpenCVH && setsid bash scripts/serve_demo.sh ~/runs/myrun 2 < /dev/null'
-ssh ubuntu@<ec2> 'cd ~/OpenCVH && setsid bash scripts/serve_demo.sh restart ~/runs/myrun 2 < /dev/null'  # same URL
-ssh ubuntu@<ec2> 'bash ~/OpenCVH/scripts/serve_demo.sh stop'
-
-# Tests
+# Tests (need several GB of free disk)
 python -m pytest -q tests
 ```
 
-**Pinned versions** (verified on 2026-10-22/24): OpenCV 5.0.0 (`opencv-contrib-python-headless==5.0.0.93`),
-ROS 2 Jazzy, RTAB-Map 0.23.13, GTSAM 4.2.0 (`ros-jazzy-gtsam`), PyTorch 2.14.1+cpu, numpy 1.26.4 on
-EC2, Swarm-SLAM commits in `swarm.repos`, Bedrock `us.amazon.nova-2-lite-v1:0`, cloudflared 2026.10.0.
-Python packages for the cslam nodes are pinned in `scripts/ec2_setup.sh`.
+**Pinned versions** (checked 22 to 24 Oct 2026): OpenCV 5.0.0 (`opencv-contrib-python-headless==5.0.0.93`), ROS 2 Jazzy, RTAB-Map 0.23.13, GTSAM 4.2.0, PyTorch 2.14.1+cpu, numpy 1.26.4 on EC2, Swarm-SLAM commits in `swarm.repos`, Bedrock `us.amazon.nova-2-lite-v1:0`, cloudflared 2026.10.0.
+
+**Test status.** 48 tests; on the last run 42 passed and 6 failed. Five of the failures, in `tests/test_jobs_runner.py`, raise the runner's free-disk check on a server with 1.2 GB free. The sixth was not identified.
 
 ## Limitations
 
-- **No real cameras or house.** All results come from EuRoC footage (a drone in a room and in an
-  industrial hall, grayscale, from an unofficial Hugging Face mirror). The live Wi-Fi capture, the Mac relay
-  and checkerboard calibration (spec Phase 2) are not built.
-- **AWS free plan.** DynamoDB, the load balancer and Lambda are blocked on this account, and
-  Anthropic models are refused on Bedrock. So: SQLite instead of DynamoDB, a Cloudflare tunnel
-  instead of an ALB, Amazon Nova instead of Claude. The COOL / Graviton benchmark was not run.
-- **2 vCPU.** Three robots only keep up at quarter speed. Latency in wall-clock time is about 4×
-  the data time.
-- **Recall is low in the hall (0.22–0.375; 0.667 in the room).** Coverage is only claimed at inter-robot
-  loop closures, which Swarm-SLAM reports at most once per 5 s. The dashboard shows where paths cross, but doesn't claim them.
-- **2 of 6 planted look-alike closures still auto-cover.** Odometry auto-reset keeps the map
-  complete after a failure, but loses the motion during the outage (0.34 m joint ATE vs 0.08 m).
-- **The point cloud is only as good as the poses.** Walls come out a few cm thick where cameras
-  overlap. Robot 2 (V1_03_difficult, 0.64 m ATE in `dense_live`) leaves visible doubled surfaces.
-  Stereo depth past ~4 m and white walls are dropped or noisy.
-- The quick-tunnel URL changes when the tunnel restarts.
+- Recorded footage only. Live streaming from the rig is not built.
+- Not real time. 1x is not demonstrated on this server; the AWS Free plan refused a larger instance.
+- AirMuseum accuracy is not established.
+- Free-plan limits: DynamoDB, load balancer and Lambda are blocked and Anthropic models are refused on Bedrock, so the project uses SQLite, a tunnel and Nova. The COOL / Graviton benchmark was not run.
+- 2 of 6 planted look-alike closures still auto-cover.
+- Coverage recall is low in the hall (0.22 to 0.375), because claims come only from inter-robot closures.
+- The Cloudflare quick-tunnel URL changes on every restart.
+
+## Hardware setup
+
+Capture hardware for on-site recordings: a Raspberry Pi with an M.2 HAT+ in a printed case, and a printed enclosure with three camera lenses mounted on a cap for hands-free carrying. The rig is the planned recorded-input source. Whether its output matches the upload format (two videos per robot plus a calibration) has not been checked, and no recordings or results from it are included yet. Validation is pending.
+
+<p>
+<img src="docs/figures/hardware_pi.jpg" alt="Raspberry Pi with M.2 HAT+ in a white printed case, powered over USB" height="420">
+<img src="docs/figures/hardware_rig.jpg" alt="Printed enclosure with three camera lenses mounted on the brim of a cap" height="420">
+</p>
 
 ## Credit and license
 
-This project builds on **Swarm-SLAM** (P.-Y. Lajoie and G. Beltrame, *Swarm-SLAM: Sparse
-Decentralized Collaborative Simultaneous Localization and Mapping Framework for Multi-Robot
-Systems*, IEEE RA-L 2024; MIT license, https://github.com/MISTLab/Swarm-SLAM), **RTAB-Map**,
-**GTSAM**, **CosPlace** (Berton et al., CVPR 2022) and the **EuRoC MAV dataset** (Burri et al.,
-IJRR 2016). This team built the OpenCV 5 front end, the ROS bridge without cv_bridge, the event
-recorder, the Bedrock coordinator and its guardrails, the dashboard, the failure injection and
-all evaluation code. Swarm-SLAM itself is used unmodified.
+Builds on **Swarm-SLAM** (Lajoie and Beltrame, IEEE RA-L 2024, MIT, https://github.com/MISTLab/Swarm-SLAM), **RTAB-Map**, **GTSAM**, **CosPlace** (Berton et al., CVPR 2022), the **EuRoC MAV dataset** (Burri et al., IJRR 2016) and the AirMuseum footage. Swarm-SLAM is used unmodified. This team built the OpenCV 5 front end, the ROS bridge, the recorder, the coordinator and guardrails, the dashboard and job runner, the failure injection and the evaluation.
+
+License: not yet specified.

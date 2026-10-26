@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" font-family="Helvetica, Arial, sans-serif">
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+<marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b45309"/></marker>
+</defs>
+<rect width="1600" height="900" fill="#f8fafc"/>
+<text x="40" y="52" font-size="30" font-weight="700" fill="#0f172a">Swarm coverage</text>
+<text x="40" y="82" font-size="17" fill="#475569">Multi-camera stereo SLAM on AWS, with a coordinator that keeps a human in the loop</text>
+<!-- column labels -->
+<text x="40" y="132" font-size="13" font-weight="700" fill="#64748b" letter-spacing="2">INPUT</text>
+<text x="360" y="132" font-size="14" font-weight="700" fill="#c2410c" letter-spacing="0.5">AWS EC2  m7i-flex.large, Ubuntu 24.04, ROS 2 Jazzy</text>
+<text x="1250" y="132" font-size="13" font-weight="700" fill="#64748b" letter-spacing="2">OUTPUT</text>
+<!-- inputs -->
+<rect x="40" y="150" width="270" height="170" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="60" y="184" font-size="18" font-weight="700" fill="#0f172a">Recorded stereo footage</text>
+<text x="60" y="212" font-size="14" fill="#475569">3 robots, left and right images</text>
+<text x="60" y="236" font-size="14" fill="#475569">EuRoC MAV (room, hall)</text>
+<text x="60" y="260" font-size="14" fill="#475569">AirMuseum (hangar zones)</text>
+<text x="60" y="292" font-size="13" fill="#64748b">upload job or replayed at set rate</text>
+<rect x="40" y="350" width="270" height="150" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="60" y="384" font-size="18" font-weight="700" fill="#475569">Wearable camera rig</text>
+<text x="60" y="412" font-size="14" fill="#64748b">Raspberry Pi, multi-lens camera</text>
+<text x="60" y="436" font-size="14" fill="#64748b">planned recorded-input source;</text>
+<text x="60" y="454" font-size="14" fill="#64748b">validation pending</text>
+<text x="60" y="484" font-size="13" fill="#64748b">live streaming: not built</text>
+<!-- EC2 container -->
+<rect x="340" y="145" width="840" height="700" rx="16" fill="#fff7ed" stroke="#ea580c" stroke-width="2.5"/>
+<!-- row A -->
+<rect x="370" y="185" width="250" height="150" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="388" y="217" font-size="17" font-weight="700" fill="#0f172a">OpenCV 5 front end</text>
+<text x="388" y="243" font-size="13.5" fill="#334155">stereoRectify, remap</text>
+<text x="388" y="263" font-size="13.5" fill="#334155">blur, ORB features</text>
+<text x="388" y="283" font-size="13.5" fill="#334155">same-row stereo check</text>
+<text x="388" y="303" font-size="13.5" fill="#334155">tracking inliers (RANSAC)</text>
+<text x="388" y="323" font-size="12" fill="#64748b">one node per camera</text>
+<rect x="660" y="185" width="200" height="150" rx="12" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+<text x="678" y="217" font-size="17" font-weight="700" fill="#0f172a">RTAB-Map</text>
+<text x="678" y="243" font-size="13.5" fill="#334155">stereo odometry</text>
+<text x="678" y="263" font-size="13.5" fill="#334155">auto-reset after 3 lost</text>
+<rect x="900" y="185" width="250" height="150" rx="12" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+<text x="918" y="217" font-size="17" font-weight="700" fill="#0f172a">Swarm-SLAM</text>
+<text x="918" y="243" font-size="13.5" fill="#334155">keyframes, place recognition</text>
+<text x="918" y="263" font-size="13.5" fill="#334155">inter-robot loop closures</text>
+<text x="918" y="283" font-size="13.5" fill="#334155">GTSAM pose graph</text>
+<text x="918" y="303" font-size="13.5" fill="#334155">one merged map</text>
+<line x1="620" y1="260" x2="658" y2="260" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<line x1="860" y1="260" x2="898" y2="260" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<line x1="310" y1="235" x2="368" y2="235" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<path d="M310 425 H340" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+<path d="M340 425 H350 V300 H368" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+<!-- recorder -->
+<rect x="370" y="395" width="780" height="70" rx="12" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+<text x="388" y="425" font-size="17" font-weight="700" fill="#0f172a">Event recorder  (events.jsonl)</text>
+<text x="388" y="450" font-size="13.5" fill="#334155">quality scores, keyframe to image stamps, inter-robot closures with success flag, merged poses</text>
+<line x1="495" y1="335" x2="495" y2="393" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<line x1="1025" y1="335" x2="1025" y2="393" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<!-- coordinator -->
+<rect x="370" y="520" width="780" height="300" rx="14" fill="#fff" stroke="#0f172a" stroke-width="2.2"/>
+<text x="390" y="552" font-size="18" font-weight="700" fill="#0f172a">Coordinator</text>
+<text x="500" y="552" font-size="13.5" fill="#475569">rules in code by default; optional Amazon Nova 2 Lite on Bedrock with tool calls</text>
+<line x1="760" y1="465" x2="760" y2="518" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<rect x="390" y="580" width="350" height="110" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="406" y="610" font-size="16" font-weight="700" fill="#0f172a">OpenCV 5 re-verification</text>
+<text x="406" y="634" font-size="13.5" fill="#334155">ORB + MAGSAC on both keyframes</text>
+<text x="406" y="654" font-size="13.5" fill="#334155">auto only if inliers >= 50 and</text>
+<text x="406" y="674" font-size="13.5" fill="#334155">spread >= 10% of each image</text>
+<rect x="780" y="580" width="350" height="110" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<text x="796" y="610" font-size="16" font-weight="700" fill="#0f172a">Guardrails in code</text>
+<text x="796" y="634" font-size="13.5" fill="#334155">weak or repetitive overlap goes to a person</text>
+<text x="796" y="654" font-size="13.5" fill="#334155">model cannot mark it covered</text>
+<text x="796" y="674" font-size="13.5" fill="#334155">every action logged with its values</text>
+<text x="390" y="728" font-size="14" font-weight="700" fill="#0f172a">Actions</text>
+<text x="390" y="752" font-size="13.5" fill="#334155">mark_covered   notify walker   request_approval   log_decision</text>
+<text x="390" y="778" font-size="13.5" fill="#334155">Also: weak-tracking warning, SLAM-lost alert when images look fine but no keyframes arrive</text>
+<text x="390" y="804" font-size="12" fill="#64748b">SQLite store (DynamoDB is blocked on this account)</text>
+<line x1="740" y1="635" x2="778" y2="635" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<!-- outputs -->
+<rect x="1230" y="150" width="330" height="110" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1250" y="182" font-size="17" font-weight="700" fill="#0f172a">Coverage store</text>
+<text x="1250" y="208" font-size="13.5" fill="#334155">coverage per 2 m cell, overlaps,</text>
+<text x="1250" y="228" font-size="13.5" fill="#334155">walker messages, decision log</text>
+<rect x="1230" y="290" width="330" height="110" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="1250" y="322" font-size="17" font-weight="700" fill="#0f172a">3D point cloud</text>
+<text x="1250" y="348" font-size="13.5" fill="#334155">OpenCV 5 SGBM depth per keyframe,</text>
+<text x="1250" y="368" font-size="13.5" fill="#334155">placed with the optimised pose graph</text>
+<rect x="1230" y="430" width="330" height="130" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="1250" y="462" font-size="17" font-weight="700" fill="#0f172a">Dashboard (FastAPI)</text>
+<text x="1250" y="488" font-size="13.5" fill="#334155">camera views, merged map, approvals,</text>
+<text x="1250" y="508" font-size="13.5" fill="#334155">upload jobs, decision log</text>
+<text x="1250" y="535" font-size="12" fill="#64748b">HTTPS through a Cloudflare tunnel</text>
+<rect x="1230" y="620" width="330" height="110" rx="12" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+<text x="1250" y="652" font-size="17" font-weight="700" fill="#0f172a">Operator</text>
+<text x="1250" y="678" font-size="13.5" fill="#334155">approves or rejects weak overlaps</text>
+<text x="1250" y="698" font-size="13.5" fill="#334155">with the image pair and matches</text>
+<path d="M1150 560 H1200 V205 H1228" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<path d="M1200 345 H1228" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<path d="M1200 495 H1228" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<line x1="1395" y1="560" x2="1395" y2="618" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+<path d="M1230 690 H1153" fill="none" stroke="#b45309" stroke-width="2.2" stroke-dasharray="8 6" marker-end="url(#o)"/>
+<text x="1560" y="756" font-size="12.5" fill="#b45309" text-anchor="end">dashed: the operator's answer returns to the coordinator</text>
+<!-- legend -->
+<rect x="40" y="870" width="14" height="14" rx="3" fill="#dbeafe" stroke="#2563eb"/><text x="62" y="882" font-size="13" fill="#475569">OpenCV 5</text>
+<rect x="150" y="870" width="14" height="14" rx="3" fill="#fef3c7" stroke="#b45309"/><text x="172" y="882" font-size="13" fill="#475569">human control</text>
+<rect x="290" y="870" width="14" height="14" rx="3" fill="#fff7ed" stroke="#ea580c"/><text x="312" y="882" font-size="13" fill="#475569">AWS</text>
+<rect x="380" y="870" width="14" height="14" rx="3" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="3 2"/><text x="402" y="882" font-size="13" fill="#475569">not built / not yet run</text>
+<text x="1560" y="882" font-size="12" fill="#94a3b8" text-anchor="end">Swarm-SLAM (Lajoie et al., MIT) is used unmodified</text>
+</svg>

@@ -1,12 +1,12 @@
-# Agent runbook: deploy Swarm coverage from scratch
+# Deployment guide: Swarm coverage from scratch
 
-Written for an AI coding agent (or a person) who starts with this repository, a laptop and an
+For anyone who starts with this repository, a laptop and an
 AWS account, and ends with the full system running: 3-robot Swarm-SLAM on EuRoC, the Bedrock
 coordinator, and the public dashboard with uploads. Follow the steps in order. Each step ends
 with a **check**. Don't continue until the check passes.
 
-**STOP-AND-ASK points** are actions only the human owner can take (credentials, spending,
-console clicks, making things public). At each one, ask the human, wait, and verify.
+**Owner actions** are steps only the account owner can take (credentials, spending,
+console clicks, making things public). Confirm each one before continuing.
 
 Time: about 1.5 h, mostly unattended (builds, download, a 15 min run). Cost: about $0.12/h for
 EC2 plus cents for Bedrock. Repository: https://github.com/Klick07/Swarm-coverage
@@ -18,7 +18,7 @@ EC2 plus cents for Bedrock. Repository: https://github.com/Klick07/Swarm-coverag
 | Item | Notes |
 |---|---|
 | Laptop: macOS or Linux with `git`, `ssh`, `python3` (3.11+), `curl` | Windows: use WSL |
-| AWS account the human owns | Free plan works with the workarounds below |
+| AWS account you own | Free plan works with the workarounds below |
 | AWS CLI v2 on the laptop | `brew install awscli` or https://aws.amazon.com/cli/ |
 | About 1.5 h | |
 
@@ -34,22 +34,22 @@ Fixed names used below (keep them; scripts assume these paths on EC2):
 
 ---
 
-## 1. AWS access for the agent — STOP-AND-ASK
+## 1. AWS access — OWNER ACTION
 
-Ask the human to:
+The account owner:
 
-1. **Create an IAM user** for the agent (not root) with these AWS managed policies:
-   `AmazonEC2FullAccess`, `AmazonS3FullAccess`, `AmazonBedrockFullAccess`,
-   `CloudWatchLogsFullAccess`, `AmazonSSMFullAccess`. Add an inline policy that lets it hand the
-   instance role to EC2:
+1. **Create an IAM user** for the deployment (not root) with the least privilege the steps below need. Do not attach account-wide `*FullAccess` policies. The repository code calls only Bedrock (`bedrock-runtime`, from the coordinator, and only when Nova is enabled). It does not use S3 or CloudWatch. The deployment user needs:
+   - (Untested, see the note in item 3.) EC2 actions for launching and describing one instance, security group and key pair in the deployment region (`ec2:RunInstances`, `ec2:Describe*`, `ec2:CreateSecurityGroup`, `ec2:AuthorizeSecurityGroupIngress`, `ec2:CreateKeyPair`, `ec2:CreateTags`, `ec2:StopInstances`, `ec2:StartInstances`, `ec2:TerminateInstances`), or the console path (Path B in step 2) with no AWS CLI access at all.
+   - `ssm:GetParameter` limited to `arn:aws:ssm:<region>::parameter/aws/service/canonical/*`, only for the AMI lookup in step 2. Skip it if you pick the AMI in the console.
+   - Permission to hand the instance role to EC2:
    ```json
-   {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "iam:PassRole",
-     "Resource": "arn:aws:iam::*:role/swarm-slam-ec2-role"}]}
+   {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": ["iam:PassRole", "iam:GetInstanceProfile"],
+     "Resource": ["arn:aws:iam::<account-id>:role/swarm-slam-ec2-role", "arn:aws:iam::<account-id>:instance-profile/swarm-slam-ec2-role"]}]}
    ```
 2. **Create an access key** for that user (type "CLI"), then run `aws configure` **themselves**
-   in the agent's terminal, with region `us-east-1` and output `json`. Never ask for the key in chat.
+   in the deployer's terminal, with region `us-east-1` and output `json`. Never paste the key into chat or a shared document.
 3. **Create the instance role**: IAM → Roles → Create role → AWS service → **EC2**, attach
-   `AmazonBedrockFullAccess` and `AmazonS3FullAccess`, name it `swarm-slam-ec2-role`.
+   a policy that allows only `bedrock:InvokeModel` (the Converse call is authorised by this action) on the model the coordinator uses, `us.amazon.nova-2-lite-v1:0` and its underlying foundation-model ARNs, name it `swarm-slam-ec2-role`. Skip this role entirely if you run the rules-only coordinator. **These policies are untested.** They come from reading the code, not from a deployment that used them. Check the current Bedrock model-access and ARN requirements in the AWS console, and expect to adjust them.
    (It must be a **role**, not a user. Only roles appear in EC2's "Modify IAM role" list.)
 4. Optionally set a budget alert (Billing → Budgets).
 
@@ -68,13 +68,13 @@ aws ec2 describe-vpcs --region <region> --query 'length(Vpcs)'                  
 
 ---
 
-## 2. Launch the EC2 instance — STOP-AND-ASK (spends money)
+## 2. Launch the EC2 instance — OWNER ACTION (spends money)
 
 Specs: **Ubuntu Server 24.04 LTS, x86_64** (not 26.04, not ARM) · **m7i-flex.large** (2 vCPU, 8 GB;
-works on the Free plan; larger is faster) · **30 GB gp3** · security group: **SSH from the human's IP only**
+works on the Free plan; larger is faster) · **30 GB or more gp3 (48 GB was used for the later runs)** · security group: **SSH from the owner's IP only**
 and **HTTPS** · key pair **`swarm-slam`** (RSA, .pem) · IAM role **`swarm-slam-ec2-role`**.
 
-**Path A: the agent's IAM user can use EC2.** Ask the human to approve the spend, then:
+**Path A: the deployer's IAM user can use EC2.** With the owner's approval of the spend:
 ```bash
 REGION=ap-southeast-2   # any region; Bedrock is called in us-east-1 regardless
 aws ec2 create-key-pair --region $REGION --key-name swarm-slam --query KeyMaterial --output text > ~/.ssh/swarm-slam.pem
@@ -92,11 +92,11 @@ aws ec2 run-instances --region $REGION --image-id $AMI --instance-type m7i-flex.
 (If `--iam-instance-profile` fails because the profile doesn't exist yet, the console-created role
 has one with the same name; retry a minute later, or attach the role afterwards as in path B, step 3.)
 
-**Path B: EC2 is blocked for the IAM user** (the SCP case in step 1). The human does it in the console:
+**Path B: EC2 is blocked for the IAM user** (the SCP case in step 1). The owner does it in the console:
 1. EC2 → Launch instance with the specs above; create key pair `swarm-slam` (.pem); set SSH source to **My IP**; tick HTTPS.
 2. Move the key: `mv ~/Downloads/swarm-slam.pem ~/.ssh/ && chmod 400 ~/.ssh/swarm-slam.pem`
 3. Select the instance → Actions → Security → **Modify IAM role** → `swarm-slam-ec2-role` → Update.
-4. Give the agent the **Public IPv4 address**.
+4. Note the **Public IPv4 address**.
 
 **Check** (export the IP once; it changes on every stop/start):
 ```bash
@@ -105,7 +105,7 @@ ssh -i ~/.ssh/swarm-slam.pem -o StrictHostKeyChecking=accept-new ubuntu@$EC2 \
   'lsb_release -ds; uname -m; nproc; TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60"); curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 # Expect: Ubuntu 24.04.x LTS · x86_64 · 2 · swarm-slam-ec2-role
 ```
-If SSH times out, the instance is stopped, the IP changed, or the human's own IP changed (security
+If SSH times out, the instance is stopped, the IP changed, or the owner's own IP changed (security
 group → edit SSH rule → My IP).
 
 ---
@@ -151,7 +151,7 @@ ssh -i ~/.ssh/swarm-slam.pem ubuntu@$EC2 'python3 -m venv ~/dlenv && ~/dlenv/bin
 ssh -i ~/.ssh/swarm-slam.pem ubuntu@$EC2 'tail -2 ~/data_fetch.log; df -h / | tail -1' < /dev/null   # until FETCH_DONE
 ```
 Optional second environment: `fetch_euroc.py machine_hall MH_01_easy MH_02_easy MH_03_medium` (6.6 GB).
-**Watch the disk** (30 GB total, about 16 GB used after step 3). Keep at least 2 GB free.
+**Watch the disk** (about 16 GB used after step 3 on the original 30 GB disk; later runs used a 48 GB disk and filled it). Keep at least 2 GB free.
 
 **Check:** `ls ~/data/euroc/V1_01_easy/mav0` shows `cam0 cam1 state_groundtruth_estimate0 ...`
 
@@ -180,10 +180,10 @@ script was edited; `git checkout scripts/run_euroc.sh`.
 
 ---
 
-## 6. Public dashboard — STOP-AND-ASK (makes a URL public)
+## 6. Public dashboard — OWNER ACTION (makes a URL public)
 
 Starting the tunnel publishes the dashboard (camera frames, map, decisions) on a public HTTPS URL.
-**Ask the human before running this.** Some agent sandboxes block it; then hand the command to the human.
+**Get the owner's go-ahead before running this.** Some restricted environments block it; then the owner runs the command.
 
 The setup script doesn't install `cloudflared`. Install it once, checksum-verified:
 ```bash
@@ -199,7 +199,7 @@ ssh -i ~/.ssh/swarm-slam.pem ubuntu@$EC2 'cd ~/OpenCVH && setsid bash scripts/se
 # stop everything (the URL dies):
 ssh -i ~/.ssh/swarm-slam.pem ubuntu@$EC2 'bash ~/OpenCVH/scripts/serve_demo.sh stop' < /dev/null
 ```
-Give the **URL** to the human. Treat the **token** (`~/demo_logs/approval_token`) as a password. It's
+Share the **URL** with the owner. Treat the **token** (`~/demo_logs/approval_token`) as a password. It's
 needed to approve, reject, upload and delete.
 
 **Check:**
@@ -262,7 +262,7 @@ precision 1.00, recall about 0.67. Small differences between runs are normal (ti
 - [ ] A Vicon run finished with inter-robot closures > 0 and `events.jsonl` present
 - [ ] `eval.cslam_eval` prints a joint ATE well below the odometry-only value
 - [ ] The public URL returns 200, shows the run, and refuses an upload without the token
-- [ ] The human has the URL and the token
+- [ ] The owner has the URL and the token
 
 **Cleanup when finished:** `serve_demo.sh stop`; stop the instance (EC2 → Instance state → Stop) to end
 the hourly charge, or terminate it to delete everything. Deactivate the IAM access key after the event.

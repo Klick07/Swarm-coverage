@@ -1,5 +1,8 @@
 # Findings
 
+> **Phase note (2026-10-26).** This is the chronological working log from the earlier build phase, when the coordinator used Amazon Nova on Bedrock and the EuRoC recordings were the test input. Statements such as "real time" or storage sizes refer to that phase and are superseded by `docs/REPORT.md` and the README (recorded footage only, near real time not demonstrated). Results from the team's final stereo footage are pending and not included.
+
+
 Facts verified before building. Each item says how it was checked and what is still open.
 Swarm-SLAM sources inspected on 2026-10-22 at these commits:
 
