@@ -23,6 +23,8 @@ def setup(context):
     skip = context.launch_configurations["skip"]
     robots = int(context.launch_configurations["robots"])
     sequences = context.launch_configurations["sequences"].split(",")
+    data_root = os.path.expanduser(context.launch_configurations["data_root"] or DATA)
+    calib_dir = os.path.expanduser(context.launch_configurations["calib_dir"] or f"{REPO}/calib")
     out = os.path.expanduser(f"~/runs/{run}")
     os.makedirs(out, exist_ok=True)
     # `python -m` from cwd=REPO finds our package; don't touch PYTHONPATH, ROS puts rclpy there.
@@ -38,11 +40,11 @@ def setup(context):
                ExecuteProcess(cmd=["nice", "-n", "10", CV5_PYTHON, "-m", "scripts.build_pointcloud", out,
                                    "--watch", "10"], **py)]
     for i in range(robots):
-        ns, mav0 = f"/r{i}", f"{DATA}/{sequences[i]}/mav0"
+        ns, mav0 = f"/r{i}", f"{data_root}/{sequences[i]}/mav0"
         cam = f"{ns}/stereo_camera"
         actions += [
             ExecuteProcess(cmd=[CV5_PYTHON, "-m", "frontend.node", "--robot", str(i),
-                                "--calib", f"{REPO}/calib/{sequences[i]}.yaml",
+                                "--calib", f"{calib_dir}/{sequences[i]}.yaml",
                                 "--log", f"{out}/quality_r{i}.jsonl", "--frames-dir", f"{out}/frames/r{i}"], **py),
             Node(package="rtabmap_odom", executable="stereo_odometry", namespace=ns,
                  parameters=[{"frame_id": "camera_link", "publish_tf": False, "approx_sync": False,
@@ -62,7 +64,7 @@ def setup(context):
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(
                     get_package_share_directory("cslam_experiments"), "launch", "cslam", "cslam_stereo.launch.py")),
-                launch_arguments={"config_path": f"{REPO}/config/", "config_file": "cslam_stereo.yaml",
+                launch_arguments={"config_path": f"{REPO}/config/", "config_file": context.launch_configurations["cslam_config"],
                                   "robot_id": str(i), "namespace": ns, "max_nb_robots": str(robots)}.items()),
             ExecuteProcess(cmd=[CV5_PYTHON, "-m", "frontend.euroc_replay", "--robot", str(i),
                                 "--mav0", mav0, "--rate", rate, "--skip", skip,
@@ -79,6 +81,9 @@ def generate_launch_description():
         DeclareLaunchArgument("skip", default_value="2"),
         DeclareLaunchArgument("robots", default_value="3"),
         DeclareLaunchArgument("sequences", default_value=DEFAULT_SEQUENCES, description="EuRoC sequence per robot"),
+        DeclareLaunchArgument("data_root", default_value="", description="folder holding <sequence>/mav0 (default ~/data/euroc)"),
+        DeclareLaunchArgument("calib_dir", default_value="", description="folder holding <sequence>.yaml (default repo calib/)"),
+        DeclareLaunchArgument("cslam_config", default_value="cslam_stereo.yaml", description="file in config/"),
         DeclareLaunchArgument("perturb", default_value="", description="failure injection, see euroc_replay.py"),
         DeclareLaunchArgument("odom_reset", default_value="3", description="RTAB-Map Odom/ResetCountdown"),
         OpaqueFunction(function=setup),

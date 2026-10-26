@@ -26,9 +26,18 @@ from frontend.core import StereoRectifier, load_calib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROBOT_RGB = np.array([[0x39, 0x87, 0xe5], [0xd9, 0x59, 0x26], [0x19, 0x9e, 0x70]]) / 255.0  # dashboard palette
-MAX_DEPTH_M = 4.0   # depth error grows with z^2: ~8 cm per 1/4 px of disparity at 4 m
+MAX_DEPTH_M = 3.0   # depth error grows with z^2: ~5 cm per 1/4 px of disparity at 3 m; beyond that stereo guesses
 STRIDE = 4          # keep every 4th pixel in each direction before voxelizing
 VOXEL_M = 0.04
+
+
+def read_frame(path_no_ext):
+    """Frames are PNG in new runs, JPG in older ones."""
+    for ext in (".png", ".jpg"):
+        img = cv2.imread(path_no_ext + ext, cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            return img
+    return None
 
 
 def run_sequences(run):
@@ -87,11 +96,16 @@ def quat_to_rot(x, y, z, w):
 class Builder:
     def __init__(self, run):
         self.run = run
-        self.rect = [StereoRectifier(load_calib(f"{REPO}/calib/{s}.yaml")) for s in run_sequences(run)]
+        # upload jobs keep each robot's calibration next to the run; EuRoC runs use the repo's calib/
+        calib = lambda s: f"{run}/calib/{s}.yaml" if os.path.exists(f"{run}/calib/{s}.yaml") else f"{REPO}/calib/{s}.yaml"
+        self.rect = [StereoRectifier(load_calib(calib(s))) for s in run_sequences(run)]
         self.sgbm = cv2.StereoSGBM_create(minDisparity=0, numDisparities=64, blockSize=7,
-                                          P1=8 * 7 * 7, P2=32 * 7 * 7, disp12MaxDiff=1, uniquenessRatio=12,
-                                          speckleWindowSize=100, speckleRange=2,
-                                          mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
+                                          P1=8 * 7 * 7, P2=32 * 7 * 7, disp12MaxDiff=1, uniquenessRatio=18,
+                                          speckleWindowSize=200, speckleRange=2,
+                                          mode=cv2.STEREO_SGBM_MODE_SGBM)
+        # WLS filter smooths disparity while keeping edges; needs the right-view matcher for confidence.
+        self.right_matcher = cv2.ximgproc.createRightMatcher(self.sgbm)
+        self.wls = cv2.ximgproc.createDisparityWLSFilter(self.sgbm)
         self.kf_stamp = {}   # (robot, kf) -> image stamp_ns
         self.local = {}      # (robot, kf) -> (Nx3 camera-frame points, N intensities)
         self.events_pos = 0
@@ -112,11 +126,13 @@ class Builder:
 
     def keyframe_points(self, robot, kf):
         stamp = self.kf_stamp.get((robot, kf))
-        left = cv2.imread(f"{self.run}/frames/r{robot}/{stamp}.jpg", cv2.IMREAD_GRAYSCALE)
-        right = cv2.imread(f"{self.run}/frames/r{robot}_right/{stamp}.jpg", cv2.IMREAD_GRAYSCALE)
+        left = read_frame(f"{self.run}/frames/r{robot}/{stamp}")
+        right = read_frame(f"{self.run}/frames/r{robot}_right/{stamp}")
         if stamp is None or left is None or right is None:
             return None
-        disp = self.sgbm.compute(left, right).astype(np.float32) / 16.0  # SGBM disparities are fixed-point x16
+        disp_l = self.sgbm.compute(left, right)
+        disp_r = self.right_matcher.compute(right, left)
+        disp = self.wls.filter(disp_l, left, disparity_map_right=disp_r).astype(np.float32) / 16.0  # x16 fixed-point
         P = self.rect[robot].P1
         f, cx, cy, b = P[0, 0], P[0, 2], P[1, 2], self.rect[robot].baseline
         d = disp[::STRIDE, ::STRIDE]
@@ -134,7 +150,7 @@ class Builder:
         graph = latest_graph(self.run)
         if not graph:
             return None
-        clouds, colors, robots, stamps = [], [], [], []
+        clouds, colors, robots, stamps, kfs = [], [], [], [], []
         poses = read_graph(graph)
         for (robot, kf), T in poses.items():
             if robot >= len(self.rect):
@@ -149,11 +165,12 @@ class Builder:
             colors.append(ROBOT_RGB[robot] * (0.35 + 0.65 * gray[:, None] / 255.0))
             robots.append(np.full(len(pts), robot))
             stamps.append(np.full(len(pts), self.kf_stamp[(robot, kf)]))
+            kfs.append(np.full(len(pts), kf))
         if not clouds:
             return None
         t0 = min(self.kf_stamp.values())
         pts, rgb, robot, t = voxelize(np.vstack(clouds), np.vstack(colors), np.concatenate(robots),
-                                      (np.concatenate(stamps) - t0) / 1e9, VOXEL_M)
+                                      np.concatenate(kfs), (np.concatenate(stamps) - t0) / 1e9, VOXEL_M)
         if self.level is None and len(clouds) >= 100:
             self.level = floor_frame(pts, np.array([T[:3, 3] for T in poses.values()]))
         level = self.level if self.level is not None else np.eye(4)
@@ -202,13 +219,15 @@ def floor_frame(pts, cams, iters=300, tol=0.03):
     return T
 
 
-def voxelize(pts, rgb, robot, t, size):
-    """One point per occupied voxel and camera, keeping voxels hit at least twice (drops lone stereo
-    noise). Position and color are averaged; t is the earliest sighting."""
+def voxelize(pts, rgb, robot, kf, t, size):
+    """One point per occupied voxel and camera, keeping voxels seen by at least 2 DIFFERENT keyframes
+    (drops single-frame stereo noise). Position and color are averaged; t is the earliest sighting."""
     ijk = np.floor(pts / size).astype(np.int64) + (1 << 19)  # one int64 key: 20 bits per axis + camera
     keys = (ijk[:, 0] << 42) | (ijk[:, 1] << 22) | (ijk[:, 2] << 2) | robot
     _, first, inv, counts = np.unique(keys, return_index=True, return_inverse=True, return_counts=True)
-    keep = counts >= 2
+    pair = np.unique(np.column_stack([keys, kf]), axis=0)  # distinct (voxel, keyframe) sightings
+    _, kf_counts = np.unique(pair[:, 0], return_counts=True)
+    keep = kf_counts >= 2
     mean = lambda a: np.column_stack([np.bincount(inv, a[:, i]) for i in range(3)]) / counts[:, None]
     tmin = np.full(len(counts), np.inf)
     np.minimum.at(tmin, inv, t)

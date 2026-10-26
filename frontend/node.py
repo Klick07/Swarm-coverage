@@ -61,8 +61,8 @@ class FrontEnd(Node):
             self.pub_info["right"].publish(camera_info(self.rect.P2, self.rect.size, h))
         stamp_ns = msg_l.header.stamp.sec * 10**9 + msg_l.header.stamp.nanosec
         if passed and self.frames_dir:
-            cv2.imwrite(f"{self.frames_dir}/{stamp_ns}.jpg", left, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            cv2.imwrite(f"{self.frames_dir}_right/{stamp_ns}.jpg", right, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            cv2.imwrite(f"{self.frames_dir}/{stamp_ns}.png", left)  # lossless: JPEG artifacts hurt stereo matching
+            cv2.imwrite(f"{self.frames_dir}_right/{stamp_ns}.png", right)
         record = {"robot": self.robot, "stamp_ns": stamp_ns,
                   **scores, "passed": passed, "ms": round((time.perf_counter() - t0) * 1000, 1)}
         self.pub_q.publish(String(data=json.dumps(record)))

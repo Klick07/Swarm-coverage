@@ -6,3 +6,4 @@ recordings/
 .DS_Store
 runs/
 gt/
+config/job_*.yaml

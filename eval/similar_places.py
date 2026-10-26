@@ -40,8 +40,9 @@ def main(run, gt_dir, n_samples=1500, top_k=6):
         if a == b or (a, ka, b, kb) in tried or np.linalg.norm(pos[(a, ka)] - pos[(b, kb)]) < MIN_GT_DIST_M:
             continue
         tried.add((a, ka, b, kb))
-        ia = cv2.imread(f"{run}/frames/r{a}/{kf_stamp[(a, ka)]}.jpg", cv2.IMREAD_GRAYSCALE)
-        ib = cv2.imread(f"{run}/frames/r{b}/{kf_stamp[(b, kb)]}.jpg", cv2.IMREAD_GRAYSCALE)
+        from scripts.build_pointcloud import read_frame
+        ia = read_frame(f"{run}/frames/r{a}/{kf_stamp[(a, ka)]}")
+        ib = read_frame(f"{run}/frames/r{b}/{kf_stamp[(b, kb)]}")
         if ia is None or ib is None:
             continue
         res = verify_pair(ia, ib)

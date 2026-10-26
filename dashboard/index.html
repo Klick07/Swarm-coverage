@@ -172,6 +172,7 @@ td.num { font-variant-numeric: tabular-nums; }
     <div class="pc-section">
       <button class="pc-btn" id="pc-btn" onclick="loadPointCloud()">📥 Download Point Cloud</button>
       <button class="pc-btn" id="pc-refresh" onclick="refreshPointCloud()">🔄 Refresh View</button>
+      <label class="sub" style="display:inline-flex;gap:6px;align-items:center;margin-left:8px"><input type="checkbox" id="pc-paths" onchange="pcPathsUser = this.checked; pcDrawn = ''; drawPointCloud();" checked> Show camera paths</label>
       <span id="pc-status" class="sub"></span>
     </div>
     <div id="pc-viewer" style="width: 100%; height: 500px; margin-top: 12px; border-radius: 6px; overflow: hidden;">
@@ -257,7 +258,7 @@ function loadPointCloud() {
 // The cloud is downloaded once (again only when the builder rewrites it) and then grown in step with
 // the replay: each point carries the camera that saw it and when, and render(s) moves the cut-off to
 // the frame each camera is on now.
-let pc = null, pcLoading = false, pcCut = null, pcDrawn = "", pcState = null;
+let pcPathsUser = null, pc = null, pcLoading = false, pcCut = null, pcDrawn = "", pcState = null;
 
 function refreshPointCloud() {
   if (pcLoading) return;
@@ -300,7 +301,14 @@ function updatePointCloudCut(s) {
 
 function drawPointCloud() {
   if (!pc) return;
-  const key = JSON.stringify(pcCut) + pc.updated;
+  // Camera paths: shown while replaying, hidden automatically once every camera has reached the end of its path.
+  // Ticking/unticking the box overrides that.
+  const pathEnds = Object.entries(pc.paths || {}).map(([r, pth]) => [r, pth.length ? pth[pth.length - 1][0] * 1000 : 0]);
+  const replayDone = !!pcCut && pathEnds.length > 0 && pathEnds.every(([r, end]) => (pcCut[r] ?? -1) >= end - 1000);
+  const showPaths = pcPathsUser !== null ? pcPathsUser : !replayDone;
+  const pathsBox = document.getElementById("pc-paths");
+  if (pathsBox) pathsBox.checked = showPaths;
+  const key = JSON.stringify(pcCut) + pc.updated + showPaths;
   if (key === pcDrawn) return;  // replay hasn't moved; leave the plot alone
   pcDrawn = key;
   const viewer = document.getElementById("pc-viewer");
@@ -318,7 +326,7 @@ function drawPointCloud() {
   const v = name => css.getPropertyValue(name).trim();
   const traces = [{ x, y, z, type: "scatter3d", mode: "markers", hoverinfo: "skip", showlegend: false,
                     marker: { size: 1.6, color, opacity: 0.9 } }];
-  for (const [r, path] of Object.entries(pc.paths || {})) {
+  for (const [r, path] of (showPaths ? Object.entries(pc.paths || {}) : [])) {
     const upto = path.filter(p => !pcCut || (pcCut[r] ?? -1) >= p[0] * 1000);
     if (!upto.length) continue;
     const ink = v(`--robot-${r}`), now = upto[upto.length - 1];
@@ -351,7 +359,7 @@ function drawPointCloud() {
 
 
 function renderCameras(s) {
-  (s.sequences || []).forEach((seq, r) => { const el = document.getElementById(`seq${r}`); if (el) el.textContent = `EuRoC ${seq}`; });
+  (s.sequences || []).forEach((seq, r) => { const el = document.getElementById(`seq${r}`); if (el) el.textContent = seq.startsWith('AM_') ? `AirMuseum robot ${seq.slice(3)}` : `EuRoC ${seq}`; });
   for (const c of s.cameras) {
     const q = c.quality || {}, r = c.robot;
     const fmt = (v, d) => v == null ? "–" : Number(v).toFixed(d);
@@ -406,7 +414,7 @@ function drawMap(s) {
 }
 
 function render(s) {
-  document.getElementById("run").textContent = `Run ${s.run} · EuRoC replay · live`;
+  document.getElementById("run").textContent = `Run ${s.run} · ${(s.sequences || []).some(q => q.startsWith('AM_')) ? 'AirMuseum' : 'EuRoC'} replay · live`;
   const n = st => (s.counts.find(c => c.state === st) || {n: 0}).n;
   const covered = s.places.filter(p => p.status === "covered").length;
   const crossed = s.places.filter(p => p.status !== "covered" && p.cameras.length >= 2).length;

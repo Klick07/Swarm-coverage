@@ -149,7 +149,8 @@ class Coordinator:
     # --- helpers ---------------------------------------------------------------
     def _keyframe_image(self, robot, kf):
         stamp = self.kf_stamp.get((robot, kf))
-        path = f"{self.run}/frames/r{robot}/{stamp}.jpg"
+        path = next((f"{self.run}/frames/r{robot}/{stamp}{e}" for e in (".png", ".jpg")
+                     if os.path.exists(f"{self.run}/frames/r{robot}/{stamp}{e}")), None)
         return cv2.imread(path, cv2.IMREAD_GRAYSCALE) if stamp and os.path.exists(path) else None
 
     def _place(self, robot, kf):
@@ -286,6 +287,8 @@ class Coordinator:
 
 
 def events(path, speed, follow):
+    while follow and not os.path.exists(path):   # job runs: the recorder creates the file after the coordinator starts
+        time.sleep(0.5)
     with open(path) as f:
         prev = None
         while True:

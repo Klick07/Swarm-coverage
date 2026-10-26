@@ -24,6 +24,10 @@ from fastapi.responses import FileResponse
 from dashboard.uploads import analyze_video, write_meta
 
 RUN_DIR = os.environ.get("RUN_DIR", "runs/euroc3_r025_d")
+# The saved demo; an upload job can switch RUN_DIR to its own run, and back. DEFAULT_RUN_DIR / INITIAL_LIVE let a restart
+# come back showing the last job (RUN_DIR=<job run>, INITIAL_LIVE=1) while "Show saved demo" still goes to the demo.
+DEFAULT_RUN_DIR = os.environ.get("DEFAULT_RUN_DIR", RUN_DIR)
+LIVE = os.environ.get("INITIAL_LIVE") == "1"   # True while the page shows a job (running or ended), not a saved replay
 APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", os.path.expanduser("~/uploads")))
 # Cloudflare's free quick tunnel rejects request bodies over 100 MB.
@@ -50,6 +54,8 @@ app = FastAPI(title="Swarm-SLAM coordinator")
 
 
 def db():
+    if not Path(f"{RUN_DIR}/coverage.db").exists():   # never create an empty DB: sqlite would, and hide "not started yet"
+        raise HTTPException(404, "this run has no data yet")
     con = sqlite3.connect(f"{RUN_DIR}/coverage.db", isolation_level=None)
     con.row_factory = sqlite3.Row
     return con
@@ -63,11 +69,40 @@ def rows(sql, *args):
 @app.get("/")
 def index():
     # no-store: a browser once kept a cached copy from before the approval images were added.
-    return FileResponse(Path(__file__).with_name("index.html"), headers={"Cache-Control": "no-store"})
+    return FileResponse(Path(__file__).with_name(os.environ.get("DASHBOARD_PAGE", "index.html")), headers={"Cache-Control": "no-store"})
+
+
+def script_run_state(run_dir):
+    """Lifecycle of a run that was started by script, not through the upload job API (its dir is not job_<id>).
+    None for upload jobs (the page then uses the job's own meta). run.done is written when the launch stack exits;
+    exit 124 = stopped by the wall-clock cap."""
+    d = Path(run_dir)
+    if d.name.startswith("job_") or not (d / "params.txt").exists():
+        return None
+    done = d / "run.done"
+    if not done.exists():
+        return "computing"
+    return "timed_out" if "exit=124" in done.read_text() else "ended"
+
+
+def select_run(path, live):
+    global RUN_DIR, LIVE
+    RUN_DIR, LIVE = path, live
 
 
 @app.get("/api/state")
 def state():
+    try:
+        return _state()
+    except (HTTPException, sqlite3.OperationalError):   # job just started: the coordinator has not written its tables yet
+        if not LIVE:
+            raise
+        return {"run": os.path.basename(RUN_DIR), "sequences": run_sequences(RUN_DIR), "cameras": [], "places": [],
+                "trajectories": {}, "notifications": [], "pending": [], "decisions": [], "counts": [], "ignored": 0,
+                "pointcloud_updated": None, "live": LIVE, "waiting": True}
+
+
+def _state():
     places = rows("SELECT * FROM places")
     for p in places:
         p["cameras"] = json.loads(p["cameras"])
@@ -82,6 +117,8 @@ def state():
         c["last_notification"] = last[0] if last else None
     return {
         "run": os.path.basename(RUN_DIR),
+        "live": LIVE,
+        "run_state": script_run_state(RUN_DIR) if LIVE else None,
         "sequences": run_sequences(RUN_DIR),
         "cameras": cameras,
         "places": places,
@@ -99,10 +136,11 @@ def state():
 def frame(robot: int):
     """The rectified left image (OpenCV 5 front end output) the coordinator is processing now."""
     r = rows("SELECT stamp_ns FROM cameras WHERE robot=?", robot)
-    path = Path(f"{RUN_DIR}/frames/r{robot}/{r[0]['stamp_ns']}.jpg") if r else None
+    path = next((Path(f"{RUN_DIR}/frames/r{robot}/{r[0]['stamp_ns']}{e}") for e in (".png", ".jpg")
+                 if Path(f"{RUN_DIR}/frames/r{robot}/{r[0]['stamp_ns']}{e}").exists()), None) if r else None
     if path is None or not path.exists():
         raise HTTPException(404, "no frame yet")
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    return FileResponse(path, media_type="image/png" if path.suffix == ".png" else "image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/overlap/{overlap_id}/matches")
@@ -277,3 +315,8 @@ def approve(overlap_id: int, approve: bool, x_approval_token: str = Header(defau
     if cur.rowcount == 0:
         raise HTTPException(409, "overlap is not pending")
     return {"overlap_id": overlap_id, "state": "approved" if approve else "rejected", "t": time.time()}
+
+
+from dashboard import jobs_api  # noqa: E402  (needs app, require_token and select_run defined above)
+
+app.include_router(jobs_api.build_router(require_token, select_run, lambda: DEFAULT_RUN_DIR))

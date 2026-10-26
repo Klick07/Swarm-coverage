@@ -12,7 +12,8 @@ mkdir -p calib
 for s in ${SEQS//,/ }; do  # calibration per sequence, from its own sensor.yaml
   [ -f "calib/$s.yaml" ] || ~/cv5env/bin/python -m frontend.euroc_to_calib "$HOME/data/euroc/$s/mav0" "calib/$s.yaml"
 done
-cp config/cslam_stereo.yaml "$OUT/"
+CSLAM_CFG=${CSLAM_CFG:-cslam_stereo.yaml}
+cp config/$CSLAM_CFG "$OUT/"
 git rev-parse --short HEAD > "$OUT/commit.txt" 2>/dev/null || true
 echo "run=$RUN rate=$RATE skip=$SKIP seqs=$SEQS perturb=$PERTURB start=$(date -Is)" > "$OUT/params.txt"
 
@@ -21,7 +22,7 @@ MON=$!
 # ros2 launch rejects an empty "perturb:=", so only pass it when set.
 EXTRA=(); [ -n "$PERTURB" ] && EXTRA=(perturb:="$PERTURB")
 timeout "$MAX" ros2 launch launch/euroc_swarm.launch.py run:="$RUN" rate:="$RATE" skip:="$SKIP" robots:=3 \
-  sequences:="$SEQS" "${EXTRA[@]}" > "$OUT/launch.log" 2>&1
+  sequences:="$SEQS" cslam_config:="$CSLAM_CFG" "${EXTRA[@]}" > "$OUT/launch.log" 2>&1
 kill $MON
 cp -r "$HOME/runs/cslam" "$OUT/cslam_logs" 2>/dev/null || true
 echo "end=$(date -Is)" >> "$OUT/params.txt"

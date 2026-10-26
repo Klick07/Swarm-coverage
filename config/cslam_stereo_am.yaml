@@ -1,0 +1,57 @@
+# Our copy of cslam_experiments/config/kitti_stereo.yaml (originals stay unedited).
+# Changes vs. KITTI: CosPlace resnet18/64, crop 480 (EuRoC is 752x480), 3 robots,
+# (AirMuseum variant: crop 512 for 640x512 frames; otherwise identical)
+# logs on, visualization off (saves CPU on 2 vCPU).
+/**:
+  ros__parameters:
+    frontend:
+      left_image_topic: "stereo_camera/left/image_rect_color"
+      right_image_topic: "stereo_camera/right/image_rect_color"
+      left_camera_info_topic: "stereo_camera/left/camera_info"
+      right_camera_info_topic: "stereo_camera/right/camera_info"
+      odom_topic: "odom"
+      sensor_base_frame_id: "camera_link"
+      sensor_type: "stereo"
+      inter_robot_loop_closure_budget: 1
+      inter_robot_detection_period_sec: 5
+      max_queue_size: 10
+      similarity_threshold: 0.8
+      global_descriptors_topic: "global_descriptors"
+      image_crop_size: 512
+      intra_loop_min_inbetween_keyframes: 20
+      pnp_min_inliers: 20
+      detection_publication_period_sec: 1.0
+      detection_publication_max_elems_per_msg: 10
+      enable_intra_robot_loop_closures: true
+      # KITTI uses 1.0 (every frame is a keyframe). 0.6 = new keyframe when inliers to the
+      # previous keyframe drop below 60%; fewer keyframes = less CPU. Starting value, to tune.
+      keyframe_generation_ratio_threshold: 0.6
+      use_vertex_cover_selection: true
+      map_manager_process_period_ms: 100
+      enable_sparsification: true
+      global_descriptor_technique: "cosplace"
+      nn_checkpoint: "models/resnet18_64.pth"
+      cosplace:
+        backbone: "resnet18"
+        descriptor_dim: 64
+    neighbor_management:
+      enable_neighbor_monitoring: true
+      max_heartbeat_delay_sec: 5.0
+      init_delay_sec: 5.0
+      heartbeat_period_sec: 1.0
+    backend:
+      pose_graph_optimization_start_period_ms: 10000
+      pose_graph_optimization_loop_period_ms: 100
+      max_waiting_time_sec: 60
+      enable_broadcast_tf_frames: true
+    evaluation:
+      enable_logs: true
+      # Off by default; without it pose_timestamps*.csv are empty and poses can't be matched to ground truth.
+      enable_pose_timestamps_recording: true
+      log_folder: "/home/ubuntu/runs/cslam"
+      enable_gps_recording: false
+      gps_topic: "gps/fix"
+      enable_sparsification_comparison: false
+    visualization:
+      enable: false
+      publishing_period_ms: 1000
