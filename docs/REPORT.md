@@ -2,7 +2,7 @@
 
 Technical report v3 (working draft) · OpenCV 5 hackathon, Agentic Vision Award track · prepared 2026-10-26 (IST)
 
-> **Draft status.** Not submitted or published. Sections 1-10 are the 2026-10-25 report, re-checked for scope. Section 11 is new (AirMuseum upload jobs, lighter 3-robot runs, replay vs compute). Section 12 (the team's final stereo footage test) is **PENDING**: no result exists and none is claimed. [TEAM] marks facts only the team can supply.
+> **Working draft.** Code and documentation published on GitHub; hackathon submission not made. Final-footage validation pending. Sections 1-10 are the 2026-10-25 report, re-checked for scope. Section 11 is new (AirMuseum upload jobs, lighter 3-robot runs, replay vs compute). Section 12 (the team's final stereo footage test) is **PENDING**: no result exists and none is claimed. [TEAM] marks facts only the team can supply.
 >
 > **Phase tags used throughout.** **[EuRoC, Nova]** = EuRoC runs where the coordinator used Amazon Nova on Bedrock. **[EuRoC, rules replay]** = a saved EuRoC run re-played through the same rules in code, no Nova. **[AirMuseum, compute]** = uploaded AirMuseum images processed by the pipeline on EC2 in that run, decisions by rules in code. A *replay* re-shows recorded events; it is not new computation.
 
